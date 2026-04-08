@@ -1,0 +1,6 @@
+# 로컬에서만: `npx wrangler pages deploy dist --project-name=본인이름` 쓸 때 참고.
+# GitHub → Cloudflare Pages 연동 시에는 루트에 wrangler.toml 을 두지 마세요.
+# (두면 Workers 배포로 오인되어 빌드가 실패할 수 있습니다.)
+
+name = "gun-fight"
+compatibility_date = "2024-12-30"

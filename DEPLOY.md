@@ -81,15 +81,45 @@
 
 ### 5단계 — 웹게임 파일 빌드하기
 
-터미널 (PowerShell):
+프로젝트 폴더에서 **한 번에** (의존성 설치 + Vite 빌드):
 
 ```powershell
 cd e:\2026games\gun_fight
-npm install
-npm run build
+npm run pages:build
 ```
 
-끝나면 폴더 **`dist`** 가 생긴다. 안에 `index.html`, `assets`, **`mp-ws-config.json`** 이 포함돼 있어야 한다.
+(`package.json` 의 `pages:build` = `npm install` 후 `npm run build` 자동 실행.)
+
+수동으로 나누려면 예전처럼 `npm install` → `npm run build` 도 동일하다.
+
+#### `npm` / `node` 가 인식되지 않을 때 (Windows)
+
+PowerShell에 **`npm: The term 'npm' is not recognized`** 가 나오면 **Node.js가 없거나 PATH에 안 잡힌 것**이다.
+
+1. **[nodejs.org](https://nodejs.org)** 에서 **LTS** 설치 프로그램 받아 실행한다.  
+2. 설치 마법사에서 **“Add to PATH”** / PATH 관련 옵션이 있으면 **켜 둔다.**  
+3. **Cursor·PowerShell·터미널 창을 전부 닫았다가** 다시 연다. (이전 세션은 옛 PATH를 쓴다.)  
+4. 새 창에서 확인:
+   ```powershell
+   node -v
+   npm -v
+   ```
+5. **nvm-windows** 를 쓰는 경우: 관리자 PowerShell에서 `nvm list` 후 `nvm use 버전` 한 번 실행한 뒤, 같은 창에서 `npm run pages:build` 한다.  
+6. 그래도 안 되면: Windows **설정 → 시스템 → 정보 → 고급 시스템 설정 → 환경 변수** → 사용자 또는 시스템 **Path** 에  
+   `C:\Program Files\nodejs` 가 있는지 보고, 없으면 **추가**한다.
+
+끝나면 폴더 **`dist`** 가 생긴다. 구조 예시:
+
+```text
+dist/
+  index.html
+  mp-ws-config.json    ← public 과 같은 이름, dist 루트 (assets 안이 아님)
+  assets/
+    index-xxxxx.js
+    …
+```
+
+**`mp-ws-config.json` 은 `dist/assets/` 가 아니라 `dist/` 바로 아래**에 있다. 탐색기에서 `dist` 를 열었을 때 `index.html` 옆에 있어야 한다. (빌드는 `vite.config.js` 에서 한 번 더 복사해 두어 누락을 막는다.)
 
 ---
 
@@ -102,8 +132,10 @@ npm run build
 3. 같은 **GitHub 저장소** 연결.  
 4. 빌드 설정:
    - **Framework preset**: None 또는 Vite  
-   - **Build command**: `npm run build`  
+   - **Build command**: **`npm run build`** 권장. (`npm install` 은 Cloudflare가 먼저 함.)  
+     - **`npm run pages:deploy` 는 쓰지 마세요.** — 안에서 `wrangler pages deploy` 가 돌아가며 Git Pages 빌드와 맞지 않고 실패하기 쉽습니다.  
    - **Build output directory**: `dist`  
+   - **중요**: 저장소 **루트에 `wrangler.toml` 을 두지 마세요.** Workers 배포로 오인되어 `main = src/index.ts` / `wrangler deploy` 오류가 날 수 있습니다. 로컬 CLI용 예시는 `wrangler.pages.local.example.toml` 만 참고합니다.  
 5. **Save and Deploy**. 완료 후 나오는 **`https://xxxx.pages.dev`** 가 **게임 주소**다.
 
 **방법 B — `dist`만 직접 업로드**
