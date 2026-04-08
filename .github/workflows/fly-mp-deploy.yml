@@ -1,0 +1,30 @@
+# Fly.io 에 mp-server(Dockerfile) 배포. 저장소 Secrets 에 FLY_API_TOKEN 필요.
+# https://fly.io/docs/reference/secrets/#fly-api-tokens
+name: Deploy mp-server (Fly.io)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths:
+      - 'Dockerfile'
+      - 'fly.toml'
+      - 'server/mp-server.mjs'
+      - 'server/package.json'
+
+concurrency:
+  group: fly-mp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@v1
+
+      - name: fly deploy
+        run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}

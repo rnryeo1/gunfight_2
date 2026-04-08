@@ -1,0 +1,11 @@
+{
+  "name": "gun-fight-mp-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node mp-server.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

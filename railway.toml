@@ -1,0 +1,10 @@
+# Railway: 새 프로젝트 만들고 이 저장소 연결 → Dockerfile 자동 인식
+# Variables에 PORT는 Railway가 넣음. 필요 시 MP_MAX_PLAYERS만 추가.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10

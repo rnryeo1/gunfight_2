@@ -1,0 +1,10 @@
+# Render.com 무료 Web Service (슬립 가능)
+# Dashboard → New → Blueprint → 이 repo 연결
+services:
+  - type: web
+    name: gun-fight-ws
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /health
