@@ -1,7 +1,9 @@
-# 이 레포는 루트에 Pages 전용 `wrangler.toml` 을 둡니다 (Git + CLI 공통).
-# 프로젝트 이름이 다르면 `name = "…"` 만 바꾸면 됩니다.
-# Workers용 `main` 키는 넣지 마세요.
+# 이 레포는 기본이 Cloudflare Worker + [assets] (wrangler.toml) 입니다.
+# Pages 전용으로만 쓰려면 Cloudflare 문서의 Pages + wrangler 설정을 따로 두세요.
 
-name = "gun-fight"
+name = "gunfight2"
 compatibility_date = "2024-12-30"
-pages_build_output_dir = "dist"
+
+[assets]
+directory = "./dist"
+not_found_handling = "single-page-application"

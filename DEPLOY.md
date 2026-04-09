@@ -123,56 +123,41 @@ dist/
 
 ---
 
-### 6단계 — Cloudflare Pages에 `dist` 올리기
+### 6단계 — Cloudflare에 `dist` 올리기 (이 레포 기본: **Worker**)
 
-**방법 A — Git 연동 (추천, 이후 수정 편함)**
+이 프로젝트는 **`wrangler.toml`** 로 **Worker 이름 `gunfight2` + `dist` 정적 자산** 을 한 번에 올립니다. 접속 URL은 **`https://gunfight2.<계정>.workers.dev`** 형태입니다. (Pages `*.pages.dev` 와는 별개입니다.)
 
-1. **4단계** 내용을 포함해 `mp-ws-config.json` 변경을 **Git에 커밋·푸시**한다.  
-2. [Cloudflare Dashboard](https://dash.cloudflare.com) → **Workers & Pages** → **Create** → **Pages** → **Connect to Git**.  
-3. 같은 **GitHub 저장소** 연결.  
-4. 빌드 설정:
-   - **Framework preset**: **Vite** 권장 → Build command / Output directory 가 **`npm run build`** · **`dist`** 로 자동 채워짐.  
-   - 저장소 루트 **`wrangler.toml`** 에 `pages_build_output_dir = "dist"` 가 있으면 Cloudflare Pages가 **산출 폴더**를 저장소와 맞춥니다. (**Workers용 `main` 키는 넣지 마세요** — 그때만 Workers 배포로 오인될 수 있음.)  
-   - **Git 연동 빌드의 Build command** 에는 **`npm run pages:deploy` 를 넣지 마세요.** (안에서 `wrangler pages deploy` 가 또 돌아 실패하기 쉽습니다.)  
-   - **Build output directory**: `dist`  
-5. **Save and Deploy**. 완료 후 나오는 **`https://xxxx.pages.dev`** 가 **게임 주소**다.
+**방법 A — GitHub Actions (기본, 푸시마다 자동)**
 
-**방법 A2 — GitHub Actions로 푸시마다 배포 (대시보드 Git과 택일 권장)**
+1. **`.github/workflows/cloudflare-worker.yml`** — `main` 푸시 시 `npm ci` → `npm run build` → **`wrangler deploy`**.  
+2. GitHub → **Settings** → **Secrets and variables** → **Actions**  
+   - **`CLOUDFLARE_API_TOKEN`**: [API 토큰](https://dash.cloudflare.com/profile/api-tokens) — **Workers Scripts** 편집 권한 포함(템플릿 **Edit Cloudflare Workers** 등).  
+   - **`CLOUDFLARE_ACCOUNT_ID`**: 대시보드 오른쪽 **Account ID**.  
+3. **Actions** 탭에서 **Deploy Cloudflare Worker** 가 초록인지 확인.  
+4. 대시보드 **Workers & Pages** → **Workers** 목록의 **`gunfight2`** — 푸시 후 새 버전이 올라가면 **수동 배포** 대신 **API/CI 배포**로 갱신됩니다.
 
-저장소에 **`.github/workflows/cloudflare-pages.yml`** 이 있다. `main` 에 푸시할 때마다 GitHub에서 `npm ci` → `npm run build` → `wrangler pages deploy` 가 돌아 **Pages 프로젝트 `gunfight2`** 로 올라간다.
+**대시보드 Git만 쓰고 Actions 는 끄려면**  
+Worker에 **Connect repository** 가 있으면 Cloudflare 쪽 빌드와 **중복**될 수 있음 → 하나만 켤 것.
 
-1. GitHub 저장소 → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**  
-   - **`CLOUDFLARE_API_TOKEN`**: [Cloudflare](https://dash.cloudflare.com/profile/api-tokens) → **Create Token** → 템플릿 **Edit Cloudflare Workers** 쓰거나, 커스텀으로 **Account** → **Cloudflare Pages** → **Edit** 포함.  
-   - **`CLOUDFLARE_ACCOUNT_ID`**: 대시보드 **Workers & Pages** 오른쪽 **Account ID** (또는 아무 도메인 **Overview**).  
-2. **Cloudflare 대시보드에서 같은 레포로 Pages “Connect to Git” 을 켜 두었다면**, 푸시 한 번에 **Cloudflare 빌드 + GitHub Actions** 가 둘 다 돌 수 있다. **하나만** 쓰려면:  
-   - 이 워크플로만 쓸 경우 → Pages 프로젝트 **Settings** → 빌드/배포에서 **자동 배포 끄기** 또는 Git 연결 해제.  
-   - 대시보드 Git만 쓸 경우 → 이 워크플로 파일을 삭제하거나 `on.push` 를 비활성화.  
-3. **Actions** 탭에서 워크플로 성공 여부와 로그를 본다.
+**방법 B — Cloudflare Pages (선택)**
 
-**Cloudflare 대시보드에서 GitHub 배포(커밋) 보기**
+`*.pages.dev` 가 필요하면 **Create → Pages → Connect to Git**, 빌드 **`npm run build`**, 출력 **`dist`**. 이 경우 루트 **`wrangler.toml`** 은 Pages용과 섞이면 헷갈리므로, Pages 전용 브랜치/설정을 따로 두거나 Worker 배포 워크플로를 끈다.
 
-- [Workers & Pages](https://dash.cloudflare.com) → **Pages** 프로젝트 **`gunfight2`** (이름이 다르면 본인 프로젝트) → **Deployments** (배포).  
-- 각 배포 줄에 **브랜치·커밋 해시**가 붙어 있으면 GitHub 푸시·Actions 배포와 연결된 것이다. (워크플로에서 `--branch`·`--commit-hash` 를 넘기도록 되어 있음.)  
-- **방법 A** 처럼 대시보드에서 **Connect to Git** 만 쓴 경우에도 같은 **Deployments** 에서 커밋·빌드 로그를 볼 수 있다.  
-- GitHub 쪽에서는 저장소 **Actions** 탭에서 **Deploy Cloudflare Pages** 워크플로 실행 여부를 본다.
+**배포가 안 보일 때**
 
-**배포가 Cloudflare / GitHub에 “안 생김”일 때**
+1. **Actions** → **Deploy Cloudflare Worker** 로그 — Secrets 미설정 시 첫 단계에서 에러.  
+2. **Workers** 탭에서 **`gunfight2`** 이름이 `wrangler.toml` 의 `name` 과 같은지 확인.  
+3. API 토큰에 **Worker 배포** 권한이 있는지 확인.
 
-1. **GitHub → Actions** → **Deploy Cloudflare Pages** 최근 실행을 연다.  
-   - **빨간 X**면 로그 맨 위를 본다. **`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` 없음** 메시지가 나오면 저장소 **Settings → Secrets and variables → Actions** 에 두 값을 넣는다. (없으면 배포 단계까지 가지 않는다.)  
-2. Cloudflare에서는 **`…workers.dev` Workers 목록**이 아니라 **Pages** 프로젝트(예: `gunfight2`)를 연 뒤 **Deployments** 탭을 본다.  
-3. Pages 프로젝트 이름이 `gunfight2` 가 아니면 `.github/workflows/cloudflare-pages.yml` 안 `--project-name=` 을 본인 이름으로 바꾼 뒤 다시 푸시한다.
+**로컬에서 한 번에 빌드+배포**
 
-**방법 B — `dist`만 직접 업로드**
-
-1. Pages에서 **Direct Upload** 로 **`dist` 폴더 안의 파일들**만 올린다 (`node_modules` 전체는 안 됨).  
-2. 또는 로컬에서 Wrangler 사용 시: `npm run build` 후 `npm run pages:deploy` (토큰·프로젝트명 설정 필요, `package.json` 참고).
+`npm run build` 후 **`npm run pages:deploy`** (`wrangler deploy`, 로컬에 `wrangler login` 또는 환경변수 토큰).
 
 ---
 
 ### 7단계 — 혼자 테스트
 
-1. 브라우저에서 **Cloudflare Pages URL** (`https://….pages.dev`) 연다.  
+1. 브라우저에서 **게임 URL**을 연다 — Worker 기준이면 `https://gunfight2.<계정>.workers.dev`, Pages 쓰면 `https://….pages.dev`.  
 2. 메뉴에서 **「오픈월드 MMO 입장」** (또는 **온라인 깃발**) 클릭.  
 3. 연결이 안 되면 **F12 → Console / Network** 에서 WebSocket 오류를 본다.  
    - `mpWsUrl` 오타, `wss` 아님, Render 슬립(첫 접속 대기) 등을 의심한다.
@@ -181,7 +166,7 @@ dist/
 
 ### 8단계 — 친구와 멀티
 
-1. 친구에게 **같은 Pages URL** 을 보낸다.  
+1. 친구에게 **같은 게임 URL**(Workers 또는 Pages)을 보낸다.  
 2. 둘 다 **같은 모드**(예: MMO)로 들어가고, **방 ID**를 맞춘다. 메뉴 **「연결 설정」** 에서 기본 **`public`** 이면 둘 다 `public` 으로 두면 같은 방이다.  
 3. Render **무료 플랜**은 가끔 **슬립** → 첫 접속이 느릴 수 있다.
 
@@ -196,7 +181,7 @@ dist/
 | 3 | `/health` → `gun-fight-mp ok` | ☐ |
 | 4 | `mp-ws-config.json` → `wss://…onrender.com` | ☐ |
 | 5 | `npm run build` | ☐ |
-| 6 | Cloudflare Pages에 배포 | ☐ |
+| 6 | Cloudflare(Worker 또는 Pages)에 배포 | ☐ |
 | 7 | MMO 입장 테스트 | ☐ |
 
 ---
@@ -504,7 +489,7 @@ flowchart LR
 npm run pages:deploy
 ```
 
-내부적으로 `npm run build` 후 `wrangler pages deploy` 를 실행합니다 (`wrangler.toml` 의 `name` · `pages_build_output_dir` 사용). 프로젝트 이름을 바꿨다면 `wrangler.toml` 의 `name` 과 맞추세요.
+내부적으로 `npm run build` 후 **`wrangler deploy`** 를 실행합니다 (`wrangler.toml` 의 `name` · `[assets]`). Worker 이름을 바꿨다면 `wrangler.toml` 의 `name` 과 맞추세요.
 
 ---
 
