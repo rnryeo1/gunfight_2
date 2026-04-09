@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "mp-server": "node server/mp-server.mjs",
     "pages:build": "npm install && npm run build",
-    "pages:deploy": "npm run pages:build && wrangler pages deploy dist --project-name=gun-fight",
+    "pages:deploy": "npm run pages:build && wrangler pages deploy",
     "docker:mp": "docker build -t gun-fight-ws .",
     "deploy:fly": "fly deploy"
   },

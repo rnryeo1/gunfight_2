@@ -131,11 +131,10 @@ dist/
 2. [Cloudflare Dashboard](https://dash.cloudflare.com) → **Workers & Pages** → **Create** → **Pages** → **Connect to Git**.  
 3. 같은 **GitHub 저장소** 연결.  
 4. 빌드 설정:
-   - **Framework preset**: None 또는 Vite  
-   - **Build command**: **`npm run build`** 권장. (`npm install` 은 Cloudflare가 먼저 함.)  
-     - **`npm run pages:deploy` 는 쓰지 마세요.** — 안에서 `wrangler pages deploy` 가 돌아가며 Git Pages 빌드와 맞지 않고 실패하기 쉽습니다.  
+   - **Framework preset**: **Vite** 권장 → Build command / Output directory 가 **`npm run build`** · **`dist`** 로 자동 채워짐.  
+   - 저장소 루트 **`wrangler.toml`** 에 `pages_build_output_dir = "dist"` 가 있으면 Cloudflare Pages가 **산출 폴더**를 저장소와 맞춥니다. (**Workers용 `main` 키는 넣지 마세요** — 그때만 Workers 배포로 오인될 수 있음.)  
+   - **Git 연동 빌드의 Build command** 에는 **`npm run pages:deploy` 를 넣지 마세요.** (안에서 `wrangler pages deploy` 가 또 돌아 실패하기 쉽습니다.)  
    - **Build output directory**: `dist`  
-   - **중요**: 저장소 **루트에 `wrangler.toml` 을 두지 마세요.** Workers 배포로 오인되어 `main = src/index.ts` / `wrangler deploy` 오류가 날 수 있습니다. 로컬 CLI용 예시는 `wrangler.pages.local.example.toml` 만 참고합니다.  
 5. **Save and Deploy**. 완료 후 나오는 **`https://xxxx.pages.dev`** 가 **게임 주소**다.
 
 **방법 B — `dist`만 직접 업로드**
@@ -479,7 +478,7 @@ flowchart LR
 npm run pages:deploy
 ```
 
-내부적으로 `npm run build` 후 `wrangler pages deploy dist --project-name=gun-fight` 를 실행합니다.
+내부적으로 `npm run build` 후 `wrangler pages deploy` 를 실행합니다 (`wrangler.toml` 의 `name` · `pages_build_output_dir` 사용). 프로젝트 이름을 바꿨다면 `wrangler.toml` 의 `name` 과 맞추세요.
 
 ---
 

@@ -1,0 +1,7 @@
+# Cloudflare Pages — Git 연동 시 빌드 산출물 폴더를 저장소에서 고정합니다.
+# Workers 배포로 오인되지 않게 `main` 키는 넣지 마세요.
+# https://developers.cloudflare.com/pages/functions/wrangler-configuration/
+
+name = "gun-fight"
+compatibility_date = "2024-12-30"
+pages_build_output_dir = "dist"
