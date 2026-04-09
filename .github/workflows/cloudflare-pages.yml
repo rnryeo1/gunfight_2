@@ -1,13 +1,15 @@
 # main 푸시 시 빌드 후 Cloudflare Pages(gunfight2) 배포.
-# GitHub → 저장소 Settings → Secrets and variables → Actions 에 다음 추가:
-#   CLOUDFLARE_API_TOKEN  (Account → Cloudflare Pages → Edit 권한)
-#   CLOUDFLARE_ACCOUNT_ID (대시보드 오른쪽 사이드바 또는 Workers 개요에서 Account ID)
 #
-# Cloudflare 대시보드에서 같은 레포로 Pages Git 연동을 켜 두었다면 빌드가 중복될 수 있음.
-# 이 워크플로만 쓸 경우: Pages 프로젝트 Settings → Builds → 자동 배포 끄기 또는 Git 연결 해제.
+# 필수: GitHub → 저장소 Settings → Secrets and variables → Actions
+#   CLOUDFLARE_API_TOKEN   (Account → Cloudflare Pages → Edit)
+#   CLOUDFLARE_ACCOUNT_ID  (대시보드 오른쪽 Account ID)
 #
-# --branch / --commit-hash 로 Cloudflare Deployments 에 Git 커밋이 묶여 보이고,
-# gitHubToken 으로 GitHub 저장소의 Deployments 탭에도 상태가 남을 수 있음.
+# Cloudflare에서 배포/커밋이 안 보이면:
+#   - GitHub Actions 탭에서 이 워크플로가 초록인지 확인 (Secrets 없으면 첫 단계에서 실패)
+#   - Workers 목록이 아니라 Pages 프로젝트 → Deployments 를 연다
+#   - 프로젝트 이름이 gunfight2 가 맞는지 확인 (다르메 아래 --project-name 수정)
+#
+# 대시보드에서 같은 레포로 Pages Git 연동을 켜 두었다면 빌드가 중복될 수 있음.
 name: Deploy Cloudflare Pages
 
 on:
@@ -24,7 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      deployments: write
     steps:
       - uses: actions/checkout@v4
 
@@ -36,15 +37,26 @@ jobs:
       - name: Install and build
         run: npm ci && npm run build
 
+      - name: Require Cloudflare secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::GitHub 저장소 Settings → Secrets and variables → Actions 에서"
+            echo "::error::CLOUDFLARE_API_TOKEN 과 CLOUDFLARE_ACCOUNT_ID 를 등록해야 배포됩니다."
+            exit 1
+          fi
+
       - name: Deploy to Cloudflare Pages
-        id: pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
-          command: >-
-            pages deploy dist --project-name=gunfight2
-            --branch=${{ github.ref_name }}
-            --commit-hash=${{ github.sha }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler pages deploy dist \
+            --project-name=gunfight2 \
+            --branch="$GITHUB_REF_NAME" \
+            --commit-hash="$GITHUB_SHA" \
+            --commit-message="Actions ${GITHUB_SHA:0:7}" \
             --commit-dirty=false
