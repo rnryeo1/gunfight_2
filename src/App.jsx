@@ -104,9 +104,9 @@ const CAM_OFFSET = new THREE.Vector3(14, 16, 14)
 const CAM_ZOOM_MIN = 0.5
 const CAM_ZOOM_MAX = 1.72
 const CAM_ZOOM_PER_NOTCH = 1.06
-/** 우클릭 드래그 시 카메라 수평 회전 (라디안/픽셀, 마우스 오른쪽으로 당기면 시계 방향 궤도) */
+/** 좌클릭 드래그(이동 클릭 유지) 시 카메라 수평 회전 (라디안/픽셀) */
 const CAM_ORBIT_YAW_PER_PX = 0.0021
-/** 우클릭 드래그 시 카메라 수직 회전 (라디안/픽셀, 마우스를 아래로 당기면 아래를 더 내려다봄) */
+/** 좌클릭 드래그 시 카메라 수직 회전 (라디안/픽셀) */
 const CAM_ORBIT_PITCH_PER_PX = 0.0021
 /** 추가 피치 상한·하한 (라디안, 기본 오프셋 기준) */
 const CAM_ORBIT_PITCH_MIN = -1.25
@@ -1672,7 +1672,8 @@ function GameScene({
     rotY: 0,
   })
 
-  const rmbHeldRef = useRef(false)
+  /** 좌클릭으로 이동 지점 찍은 뒤 드래그 중이면 true (카메라 궤도) */
+  const moveDragHeldRef = useRef(false)
   const lastMpSendRef = useRef(0)
 
   const lastPointerGroundRef = useRef(new THREE.Vector3())
@@ -1849,7 +1850,7 @@ function GameScene({
 
   useEffect(() => {
     const up = (e) => {
-      if (e.button === 2) rmbHeldRef.current = false
+      if (e.button === 0) moveDragHeldRef.current = false
     }
     window.addEventListener('pointerup', up)
     return () => window.removeEventListener('pointerup', up)
@@ -1962,7 +1963,7 @@ function GameScene({
         lastPointerGroundRef.current.copy(pt)
         hasPointerGroundRef.current = true
       }
-      if (e.buttons & 2 && rmbHeldRef.current) {
+      if (e.buttons & 1 && moveDragHeldRef.current) {
         camOrbitYawRef.current -= e.movementX * CAM_ORBIT_YAW_PER_PX
         camOrbitPitchRef.current -= e.movementY * CAM_ORBIT_PITCH_PER_PX
         camOrbitPitchRef.current = THREE.MathUtils.clamp(
@@ -1990,16 +1991,10 @@ function GameScene({
         hasPointerGroundRef.current = true
       }
 
-      if (e.button === 2) {
-        if (attackAimActiveRef.current && aimMarkerVisibleRef.current) {
-          aimMarkerVisibleRef.current = false
-          setGameCursor(CURSOR_RTS_GAUNTLET)
-          return
-        }
-
+      if (e.button === 0) {
         if (!p) return
         if (onlineCtf && slot === 1) {
-          rmbHeldRef.current = true
+          moveDragHeldRef.current = true
           moveTarget.current.copy(p)
           ;[moveTarget.current.x, moveTarget.current.z] = clampXZToArena(
             moveTarget.current.x,
@@ -2015,7 +2010,7 @@ function GameScene({
           const p2 = player2Pos.current
           ind.rotY = Math.atan2(ind.pos.x - p2.x, ind.pos.z - p2.z)
         } else if (!onlineCtf || slot === 0) {
-          rmbHeldRef.current = true
+          moveDragHeldRef.current = true
           moveTarget.current.copy(p)
           ;[moveTarget.current.x, moveTarget.current.z] = clampXZToArena(
             moveTarget.current.x,
@@ -2033,7 +2028,7 @@ function GameScene({
             ind.pos.z - playerPos.current.z,
           )
         }
-      } else if (e.button === 0) {
+      } else if (e.button === 2) {
         const aimGround =
           p ||
           (hasPointerGroundRef.current ? lastPointerGroundRef.current : null)
@@ -2066,7 +2061,11 @@ function GameScene({
           clubMeleeQueuedP0Ref.current = { aim: false }
           return
         }
-        if (isCtfGameMode(gameMode) && fromP2 && currentWeaponId.current === 'club') {
+        if (
+          isCtfGameMode(gameMode) &&
+          fromP2 &&
+          currentWeaponIdP2.current === 'club'
+        ) {
           const pos = player2Pos.current
           if (aimGround) {
             const g0 = terrainHeight(pos.x, pos.z)
@@ -2080,20 +2079,33 @@ function GameScene({
           clubMeleeQueuedP1Ref.current = { aim: false }
           return
         }
-        if (!p) return
-        if (attackAimActiveRef.current) {
-          if (!aimMarkerVisibleRef.current) return
-          const pos = fromP2 ? player2Pos.current : playerPos.current
-          trySpawnBullet(p.x - pos.x, p.z - pos.z)
-          return
-        }
         const pos = fromP2 ? player2Pos.current : playerPos.current
-        const g = terrainHeight(pos.x, pos.z)
-        const origin = new THREE.Vector3(pos.x, g + 0.75, pos.z)
-        const dir = p.clone().sub(origin)
-        dir.y = 0
-        if (dir.lengthSq() < 1e-6) return
-        trySpawnBullet(dir.x, dir.z)
+        const bodyRef = fromP2 ? player2Ref : playerRef
+        const g0 = terrainHeight(pos.x, pos.z)
+        const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
+        let dirX
+        let dirZ
+        if (aimGround) {
+          const dir = new THREE.Vector3().subVectors(aimGround, origin)
+          dir.y = 0
+          if (dir.lengthSq() > 1e-6) {
+            dir.normalize()
+            if (bodyRef.current) bodyRef.current.rotation.y = Math.atan2(dir.x, dir.z)
+            dirX = dir.x
+            dirZ = dir.z
+          }
+        }
+        if (dirX === undefined) {
+          const yaw = bodyRef.current?.rotation.y ?? 0
+          dirX = Math.sin(yaw)
+          dirZ = Math.cos(yaw)
+        }
+        const pWid = fromP2 ? currentWeaponIdP2.current : currentWeaponId.current
+        trySpawnBullet(
+          dirX,
+          dirZ,
+          fromP2 && isCtfGameMode(gameMode) ? pWid : null,
+        )
       }
     }
 
@@ -2834,7 +2846,7 @@ function GameScene({
         p.x += moveDelta.x
         p.z += moveDelta.z
 
-        if (!rmbHeldRef.current && playerRef.current) {
+        if (!moveDragHeldRef.current && playerRef.current) {
           playerRef.current.rotation.y = Math.atan2(moveDelta.x, moveDelta.z)
         }
       }
@@ -2851,7 +2863,7 @@ function GameScene({
         p2.x += moveDelta.x
         p2.z += moveDelta.z
 
-        if (!rmbHeldRef.current && player2Ref.current) {
+        if (!moveDragHeldRef.current && player2Ref.current) {
           player2Ref.current.rotation.y = Math.atan2(moveDelta.x, moveDelta.z)
         }
       }
@@ -4325,23 +4337,23 @@ export default function App() {
       >
         {gameMode === GAME_MODE_MMO_ONLINE ? (
           <>
-            오픈월드 MMO · 생존 HP 1/초 감소 · 녹색 팩 +25 · 붉은 적 · 보라=다른 유저(PvP) · 우클릭 이동·카메라 · A 조준 ·
-            1·2·3 무기
+            오픈월드 MMO · 생존 HP 1/초 감소 · 녹색 팩 +25 · 붉은 적 · 보라=다른 유저(PvP) · 좌클릭 이동·카메라 · A 조준 ·
+            우클릭 공격 · 1·2·3 무기
           </>
         ) : gameMode === GAME_MODE_CTF_ONLINE ? (
           <>
-            온라인 깃발 · 첫 입장=파랑(우클릭 이동·드래그로 방향) · 두 번째=주황(IJKL·F·우클릭 이동·드래그 방향) · A
-            조준 · 1·2 무기 · 상대 체력바는 머리 위 · 휠 시야 · 깃발·점수는 파랑(호스트) 기준 동기화
+            온라인 깃발 · 첫 입장=파랑(좌클릭 이동·드래그 방향·우클릭 공격) · 두 번째=주황(IJKL·F·좌클릭 이동·드래그·우클릭
+            공격) · A 조준 · 1·2 무기 · 상대 체력바는 머리 위 · 휠 시야 · 깃발·점수는 파랑(호스트) 기준 동기화
           </>
         ) : gameMode === GAME_MODE_CTF ? (
           <>
-            파랑(P1): A 조준 · 좌클릭 발사 · 우클릭 이동 · 우클릭 드래그 시 방향 · 1·2 무기 · 스나이퍼 피격 시 스턴+깃발 드랍 ·
+            파랑(P1): A 조준 · 우클릭 공격 · 좌클릭 이동 · 좌클릭 드래그 시 방향 · 1·2 무기 · 스나이퍼 피격 시 스턴+깃발 드랍 ·
             주황(P2): IJKL 이동 · F 기관총 · 휠 시야 · 좌하 미니맵 · 바닥 색: 서쪽 파랑=아군 · 동쪽 붉은=적 · 상대 체력바 머리
             위
           </>
         ) : (
           <>
-            솔로 · 생존 HP 1/초 감소 · 녹색 회전 팩 +25(랜덤 위치) · A 조준 · 좌클릭 발사 · 우클릭 이동·카메라 · 1·2 무기 · 휠
+            솔로 · 생존 HP 1/초 감소 · 녹색 회전 팩 +25(랜덤 위치) · A 조준 · 우클릭 공격 · 좌클릭 이동·카메라 · 1·2 무기 · 휠
             시야
           </>
         )}
