@@ -149,6 +149,13 @@ dist/
    - 대시보드 Git만 쓸 경우 → 이 워크플로 파일을 삭제하거나 `on.push` 를 비활성화.  
 3. **Actions** 탭에서 워크플로 성공 여부와 로그를 본다.
 
+**Cloudflare 대시보드에서 GitHub 배포(커밋) 보기**
+
+- [Workers & Pages](https://dash.cloudflare.com) → **Pages** 프로젝트 **`gunfight2`** (이름이 다르면 본인 프로젝트) → **Deployments** (배포).  
+- 각 배포 줄에 **브랜치·커밋 해시**가 붙어 있으면 GitHub 푸시·Actions 배포와 연결된 것이다. (워크플로에서 `--branch`·`--commit-hash` 를 넘기도록 되어 있음.)  
+- **방법 A** 처럼 대시보드에서 **Connect to Git** 만 쓴 경우에도 같은 **Deployments** 에서 커밋·빌드 로그를 볼 수 있다.  
+- GitHub 쪽에서는 저장소 **Environments** / **Deployments** (워크플로에 `gitHubToken` + `deployments: write` 가 있으면 배포 기록이 쌓일 수 있음).
+
 **방법 B — `dist`만 직접 업로드**
 
 1. Pages에서 **Direct Upload** 로 **`dist` 폴더 안의 파일들**만 올린다 (`node_modules` 전체는 안 됨).  

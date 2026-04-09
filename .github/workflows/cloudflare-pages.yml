@@ -5,6 +5,9 @@
 #
 # Cloudflare 대시보드에서 같은 레포로 Pages Git 연동을 켜 두었다면 빌드가 중복될 수 있음.
 # 이 워크플로만 쓸 경우: Pages 프로젝트 Settings → Builds → 자동 배포 끄기 또는 Git 연결 해제.
+#
+# --branch / --commit-hash 로 Cloudflare Deployments 에 Git 커밋이 묶여 보이고,
+# gitHubToken 으로 GitHub 저장소의 Deployments 탭에도 상태가 남을 수 있음.
 name: Deploy Cloudflare Pages
 
 on:
@@ -21,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      deployments: write
     steps:
       - uses: actions/checkout@v4
 
@@ -33,8 +37,14 @@ jobs:
         run: npm ci && npm run build
 
       - name: Deploy to Cloudflare Pages
+        id: pages
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dist --project-name=gunfight2
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          command: >-
+            pages deploy dist --project-name=gunfight2
+            --branch=${{ github.ref_name }}
+            --commit-hash=${{ github.sha }}
+            --commit-dirty=false
