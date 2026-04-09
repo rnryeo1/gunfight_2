@@ -137,6 +137,18 @@ dist/
    - **Build output directory**: `dist`  
 5. **Save and Deploy**. 완료 후 나오는 **`https://xxxx.pages.dev`** 가 **게임 주소**다.
 
+**방법 A2 — GitHub Actions로 푸시마다 배포 (대시보드 Git과 택일 권장)**
+
+저장소에 **`.github/workflows/cloudflare-pages.yml`** 이 있다. `main` 에 푸시할 때마다 GitHub에서 `npm ci` → `npm run build` → `wrangler pages deploy` 가 돌아 **Pages 프로젝트 `gunfight2`** 로 올라간다.
+
+1. GitHub 저장소 → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**  
+   - **`CLOUDFLARE_API_TOKEN`**: [Cloudflare](https://dash.cloudflare.com/profile/api-tokens) → **Create Token** → 템플릿 **Edit Cloudflare Workers** 쓰거나, 커스텀으로 **Account** → **Cloudflare Pages** → **Edit** 포함.  
+   - **`CLOUDFLARE_ACCOUNT_ID`**: 대시보드 **Workers & Pages** 오른쪽 **Account ID** (또는 아무 도메인 **Overview**).  
+2. **Cloudflare 대시보드에서 같은 레포로 Pages “Connect to Git” 을 켜 두었다면**, 푸시 한 번에 **Cloudflare 빌드 + GitHub Actions** 가 둘 다 돌 수 있다. **하나만** 쓰려면:  
+   - 이 워크플로만 쓸 경우 → Pages 프로젝트 **Settings** → 빌드/배포에서 **자동 배포 끄기** 또는 Git 연결 해제.  
+   - 대시보드 Git만 쓸 경우 → 이 워크플로 파일을 삭제하거나 `on.push` 를 비활성화.  
+3. **Actions** 탭에서 워크플로 성공 여부와 로그를 본다.
+
 **방법 B — `dist`만 직접 업로드**
 
 1. Pages에서 **Direct Upload** 로 **`dist` 폴더 안의 파일들**만 올린다 (`node_modules` 전체는 안 됨).  

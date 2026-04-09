@@ -1,0 +1,40 @@
+# main 푸시 시 빌드 후 Cloudflare Pages(gunfight2) 배포.
+# GitHub → 저장소 Settings → Secrets and variables → Actions 에 다음 추가:
+#   CLOUDFLARE_API_TOKEN  (Account → Cloudflare Pages → Edit 권한)
+#   CLOUDFLARE_ACCOUNT_ID (대시보드 오른쪽 사이드바 또는 Workers 개요에서 Account ID)
+#
+# Cloudflare 대시보드에서 같은 레포로 Pages Git 연동을 켜 두었다면 빌드가 중복될 수 있음.
+# 이 워크플로만 쓸 경우: Pages 프로젝트 Settings → Builds → 자동 배포 끄기 또는 Git 연결 해제.
+name: Deploy Cloudflare Pages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install and build
+        run: npm ci && npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist --project-name=gunfight2
