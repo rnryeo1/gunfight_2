@@ -229,11 +229,11 @@ const AMMO_DROP_ENEMY_AMOUNT = 24
 const CLUB_MELEE_RANGE = 3.93
 const CLUB_MELEE_COS = Math.cos((50 * Math.PI) / 180)
 const CLUB_MELEE_DAMAGE = 15
-/** 몽둥이 스윙: 3구간(긴장-휘두르기-여운) · 타격은 2구간 초반 (공속 2배) */
-const CLUB_SWING_DURATION = 0.38
+/** 몽둥이 스윙: 3구간(긴장-휘두르기-여운) · 타격은 초반 · 쿨/스윙 길이로 공속 조절 */
+const CLUB_SWING_DURATION = 0.19
 const CLUB_SWING_PHASE1 = 0.34
 const CLUB_SWING_PHASE2_END = 0.62
-const CLUB_HIT_T0 = 0.14
+const CLUB_HIT_T0 = 0.07
 
 function createClubSwingState() {
   return {
@@ -341,7 +341,7 @@ const WEAPONS = {
     id: 'club',
     name: '몽둥이',
     keyLabel: '3',
-    cooldown: 0.41,
+    cooldown: 0.205,
     damage: CLUB_MELEE_DAMAGE,
     speed: 0,
     recoil: 0.04,
@@ -2038,53 +2038,38 @@ function GameScene({
         const worldLoot = !isCtfGameMode(gameMode) && !fromP2
         if (worldLoot && currentWeaponId.current === 'club') {
           const pos = playerPos.current
-          if (attackAimActiveRef.current) {
-            if (!aimMarkerVisibleRef.current) return
-            clubMeleeQueuedP0Ref.current = { aim: true, tx: p.x, tz: p.z, px: pos.x, pz: pos.z }
-          } else {
-            const g0 = terrainHeight(pos.x, pos.z)
-            const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
-            const dir = p.clone().sub(origin)
-            dir.y = 0
-            if (dir.lengthSq() > 1e-6 && playerRef.current) {
-              playerRef.current.rotation.y = Math.atan2(dir.x, dir.z)
-            }
-            clubMeleeQueuedP0Ref.current = { aim: false }
+          const g0 = terrainHeight(pos.x, pos.z)
+          const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
+          const dir = p.clone().sub(origin)
+          dir.y = 0
+          if (dir.lengthSq() > 1e-6 && playerRef.current) {
+            playerRef.current.rotation.y = Math.atan2(dir.x, dir.z)
           }
+          clubMeleeQueuedP0Ref.current = { aim: false }
           return
         }
         if (isCtfGameMode(gameMode) && !fromP2 && currentWeaponId.current === 'club') {
           const pos = playerPos.current
-          if (attackAimActiveRef.current) {
-            if (!aimMarkerVisibleRef.current) return
-            clubMeleeQueuedP0Ref.current = { aim: true, tx: p.x, tz: p.z, px: pos.x, pz: pos.z }
-          } else {
-            const g0 = terrainHeight(pos.x, pos.z)
-            const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
-            const dir = p.clone().sub(origin)
-            dir.y = 0
-            if (dir.lengthSq() > 1e-6 && playerRef.current) {
-              playerRef.current.rotation.y = Math.atan2(dir.x, dir.z)
-            }
-            clubMeleeQueuedP0Ref.current = { aim: false }
+          const g0 = terrainHeight(pos.x, pos.z)
+          const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
+          const dir = p.clone().sub(origin)
+          dir.y = 0
+          if (dir.lengthSq() > 1e-6 && playerRef.current) {
+            playerRef.current.rotation.y = Math.atan2(dir.x, dir.z)
           }
+          clubMeleeQueuedP0Ref.current = { aim: false }
           return
         }
         if (isCtfGameMode(gameMode) && fromP2 && currentWeaponId.current === 'club') {
           const pos = player2Pos.current
-          if (attackAimActiveRef.current) {
-            if (!aimMarkerVisibleRef.current) return
-            clubMeleeQueuedP1Ref.current = { aim: true, tx: p.x, tz: p.z, px: pos.x, pz: pos.z }
-          } else {
-            const g0 = terrainHeight(pos.x, pos.z)
-            const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
-            const dir = p.clone().sub(origin)
-            dir.y = 0
-            if (dir.lengthSq() > 1e-6 && player2Ref.current) {
-              player2Ref.current.rotation.y = Math.atan2(dir.x, dir.z)
-            }
-            clubMeleeQueuedP1Ref.current = { aim: false }
+          const g0 = terrainHeight(pos.x, pos.z)
+          const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
+          const dir = p.clone().sub(origin)
+          dir.y = 0
+          if (dir.lengthSq() > 1e-6 && player2Ref.current) {
+            player2Ref.current.rotation.y = Math.atan2(dir.x, dir.z)
           }
+          clubMeleeQueuedP1Ref.current = { aim: false }
           return
         }
         if (attackAimActiveRef.current) {
