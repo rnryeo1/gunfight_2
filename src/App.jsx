@@ -1624,6 +1624,7 @@ function GameScene({
   remoteMmoPeersRef,
   mpBridgeRef,
   pendingHitRef,
+  pendingMmoHitRef,
   hitFeedbackRef,
 }) {
   const camZoomTarget = useRef(1)
@@ -2433,6 +2434,35 @@ function GameScene({
           }
           setAmmoPickupIds((prev) => [...prev, ...addIds])
         }
+
+        if (
+          gameMode === GAME_MODE_MMO_ONLINE &&
+          networkSlot != null &&
+          mpBridgeRef?.current &&
+          remoteMmoPeersRef?.current
+        ) {
+          const slotN = networkSlot
+          remoteMmoPeersRef.current.forEach((pose, sl) => {
+            if (sl === slotN || !pose || typeof pose.x !== 'number') return
+            const vy = typeof pose.y === 'number' ? pose.y : terrainHeight(pose.x, pose.z)
+            const ex = pose.x - px
+            const ez = pose.z - pz
+            const dist = Math.hypot(ex, ez)
+            if (dist > CLUB_MELEE_RANGE || dist < 1e-5) return
+            const dot = (ex / dist) * fx + (ez / dist) * fz
+            if (dot < CLUB_MELEE_COS) return
+            const aEy = terrainHeight(px, pz) + 0.75
+            const vEy = vy + 0.75
+            if (Math.abs(aEy - vEy) > 1.45) return
+            mpBridgeRef.current.send({
+              kind: 'mmo_hit',
+              victimSlot: sl,
+              dmg: CLUB_MELEE_DAMAGE,
+              sniper: false,
+              club: true,
+            })
+          })
+        }
       }
 
       if (isCtfGameMode(gameMode)) {
@@ -2521,6 +2551,27 @@ function GameScene({
         }
       }
       pendingHitRef.current = null
+    }
+
+    if (onlineMmo && pendingMmoHitRef?.current) {
+      const mh = pendingMmoHitRef.current
+      if (mh.victimSlot === slot && worldSurvival) {
+        const wh = worldSurvivalHpRef.current
+        wh.hp -= mh.dmg ?? 10
+        bumpPlayerHitFx(hitFeedbackRef, !!mh.sniper)
+        if (wh.hp <= 0) {
+          wh.hp = wh.maxHp
+          const [rx, rz] = randomOpenWorldSpawnXZ(pillars)
+          p.x = rx
+          p.z = rz
+          ;[p.x, p.z] = resolveBodyInArena(p.x, p.z, PLAYER_R, pillars)
+          p.y = terrainHeight(p.x, p.z)
+          p0VertVelRef.current = 0
+          if (playerRef.current) playerRef.current.position.set(p.x, p.y, p.z)
+          movingRef.current = false
+        }
+      }
+      pendingMmoHitRef.current = null
     }
 
     const buf = remoteBufferRef?.current
@@ -3075,6 +3126,47 @@ function GameScene({
         deadBullets.push(id)
         b.life = 0
         return
+      }
+
+      if (
+        worldSurvival &&
+        onlineMmo &&
+        mpBridgeRef?.current &&
+        remoteMmoPeersRef?.current
+      ) {
+        let hitPeerSlot = null
+        remoteMmoPeersRef.current.forEach((pose, sl) => {
+          if (hitPeerSlot != null || sl === slot || !pose || typeof pose.x !== 'number') return
+          const py = typeof pose.y === 'number' ? pose.y : terrainHeight(pose.x, pose.z)
+          const cy = py + ENEMY_HALF.y
+          if (
+            sphereIntersectsBox(
+              b.pos.x,
+              b.pos.y,
+              b.pos.z,
+              pose.x,
+              cy,
+              pose.z,
+              ENEMY_HALF.x,
+              ENEMY_HALF.y,
+              ENEMY_HALF.z,
+              br,
+            )
+          ) {
+            hitPeerSlot = sl
+          }
+        })
+        if (hitPeerSlot != null) {
+          mpBridgeRef.current.send({
+            kind: 'mmo_hit',
+            victimSlot: hitPeerSlot,
+            dmg: b.damage ?? 10,
+            sniper: b.weaponId === 'sniper',
+          })
+          deadBullets.push(id)
+          b.life = 0
+          return
+        }
       }
 
       if (isCtfGameMode(gameMode) && b.ownerTeam != null) {
@@ -3700,6 +3792,7 @@ export default function App() {
   const remoteBufferRef = useRef({ p0: null, p1: null, ctf: null })
   const remoteMmoPeersRef = useRef(new Map())
   const pendingHitRef = useRef(null)
+  const pendingMmoHitRef = useRef(null)
   const hitFeedbackRef = useRef({ vignette: 0, shake: 0, flash: 0 })
 
   const goMenu = () => {
@@ -3709,6 +3802,7 @@ export default function App() {
     remoteBufferRef.current = { p0: null, p1: null, ctf: null }
     remoteMmoPeersRef.current.clear()
     pendingHitRef.current = null
+    pendingMmoHitRef.current = null
     const fx = hitFeedbackRef.current
     if (fx) {
       fx.vignette = 0
@@ -3772,6 +3866,8 @@ export default function App() {
           remoteMmoPeersRef.current.set(from, payload)
         } else if (payload.kind === '_peer_left' && payload.slot != null) {
           remoteMmoPeersRef.current.delete(payload.slot)
+        } else if (payload.kind === 'mmo_hit') {
+          pendingMmoHitRef.current = payload
         }
       },
       onError: (err) => {
@@ -4034,6 +4130,7 @@ export default function App() {
           remoteMmoPeersRef={remoteMmoPeersRef}
           mpBridgeRef={mpBridgeRef}
           pendingHitRef={pendingHitRef}
+          pendingMmoHitRef={pendingMmoHitRef}
           hitFeedbackRef={hitFeedbackRef}
         />
       </Canvas>
@@ -4234,8 +4331,8 @@ export default function App() {
       >
         {gameMode === GAME_MODE_MMO_ONLINE ? (
           <>
-            오픈월드 MMO · 생존 HP 1/초 감소 · 녹색 팩 +25(맵 곳곳·재스폰) · 붉은 적 · 보라=다른 유저 · 우클릭 이동·카메라 · A
-            조준 · 1·2 무기
+            오픈월드 MMO · 생존 HP 1/초 감소 · 녹색 팩 +25 · 붉은 적 · 보라=다른 유저(PvP) · 우클릭 이동·카메라 · A 조준 ·
+            1·2·3 무기
           </>
         ) : gameMode === GAME_MODE_CTF_ONLINE ? (
           <>
