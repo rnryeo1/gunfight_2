@@ -2034,44 +2034,53 @@ function GameScene({
           )
         }
       } else if (e.button === 0) {
-        if (!p) return
+        const aimGround =
+          p ||
+          (hasPointerGroundRef.current ? lastPointerGroundRef.current : null)
         const worldLoot = !isCtfGameMode(gameMode) && !fromP2
         if (worldLoot && currentWeaponId.current === 'club') {
           const pos = playerPos.current
-          const g0 = terrainHeight(pos.x, pos.z)
-          const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
-          const dir = p.clone().sub(origin)
-          dir.y = 0
-          if (dir.lengthSq() > 1e-6 && playerRef.current) {
-            playerRef.current.rotation.y = Math.atan2(dir.x, dir.z)
+          if (aimGround) {
+            const g0 = terrainHeight(pos.x, pos.z)
+            const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
+            const dir = new THREE.Vector3().subVectors(aimGround, origin)
+            dir.y = 0
+            if (dir.lengthSq() > 1e-6 && playerRef.current) {
+              playerRef.current.rotation.y = Math.atan2(dir.x, dir.z)
+            }
           }
           clubMeleeQueuedP0Ref.current = { aim: false }
           return
         }
         if (isCtfGameMode(gameMode) && !fromP2 && currentWeaponId.current === 'club') {
           const pos = playerPos.current
-          const g0 = terrainHeight(pos.x, pos.z)
-          const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
-          const dir = p.clone().sub(origin)
-          dir.y = 0
-          if (dir.lengthSq() > 1e-6 && playerRef.current) {
-            playerRef.current.rotation.y = Math.atan2(dir.x, dir.z)
+          if (aimGround) {
+            const g0 = terrainHeight(pos.x, pos.z)
+            const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
+            const dir = new THREE.Vector3().subVectors(aimGround, origin)
+            dir.y = 0
+            if (dir.lengthSq() > 1e-6 && playerRef.current) {
+              playerRef.current.rotation.y = Math.atan2(dir.x, dir.z)
+            }
           }
           clubMeleeQueuedP0Ref.current = { aim: false }
           return
         }
         if (isCtfGameMode(gameMode) && fromP2 && currentWeaponId.current === 'club') {
           const pos = player2Pos.current
-          const g0 = terrainHeight(pos.x, pos.z)
-          const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
-          const dir = p.clone().sub(origin)
-          dir.y = 0
-          if (dir.lengthSq() > 1e-6 && player2Ref.current) {
-            player2Ref.current.rotation.y = Math.atan2(dir.x, dir.z)
+          if (aimGround) {
+            const g0 = terrainHeight(pos.x, pos.z)
+            const origin = new THREE.Vector3(pos.x, g0 + 0.75, pos.z)
+            const dir = new THREE.Vector3().subVectors(aimGround, origin)
+            dir.y = 0
+            if (dir.lengthSq() > 1e-6 && player2Ref.current) {
+              player2Ref.current.rotation.y = Math.atan2(dir.x, dir.z)
+            }
           }
           clubMeleeQueuedP1Ref.current = { aim: false }
           return
         }
+        if (!p) return
         if (attackAimActiveRef.current) {
           if (!aimMarkerVisibleRef.current) return
           const pos = fromP2 ? player2Pos.current : playerPos.current
