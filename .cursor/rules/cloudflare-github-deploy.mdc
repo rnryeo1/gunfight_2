@@ -1,0 +1,24 @@
+---
+description: 코드 변경 후 GitHub 푸시로 Cloudflare Worker 자동 배포 유지
+alwaysApply: true
+---
+
+# GitHub → Cloudflare 배포
+
+이 프로젝트는 **`main` 브랜치 푸시** 시 GitHub Actions(`.github/workflows/cloudflare-worker.yml`)가 **`wrangler deploy`** 로 Cloudflare Worker `gunfight2` 를 갱신한다.
+
+## 에이전트 동작
+
+사용자가 **게임·배포에 반영되길 원하는 수정**을 요청했고, 그에 맞게 파일을 고쳤다면 **대화 마무리 전에** (사용자가 명시적으로 “푸시하지 마”라고 하지 않은 한):
+
+1. `git status` 로 변경 파일 확인  
+2. **관련 파일만** `git add` (`.env`, 비밀, 불필요한 `dist/` 커밋은 제외 — `dist` 는 `.gitignore` 됨)  
+3. `git commit -m "…"` 한 줄 메시지로 커밋  
+4. `git push origin main`  
+
+푸시가 실패하면(인증·네트워크) 원인을 짧게 알려 준다.
+
+## 예외
+
+- 사용자가 **로컬만** / **커밋 금지** / **푸시하지 마** 라고 하면 푸시하지 않는다.  
+- 순수 질문-only 답변으로 저장소를 건드리지 않았으면 푸시할 필요 없다.
