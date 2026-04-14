@@ -129,12 +129,10 @@ const TERRAIN_W = MAP_HALF_X * 2 + TERRAIN_PAD
 const TERRAIN_D = MAP_HALF_Z * 2 + TERRAIN_PAD
 const TERRAIN_SEG_X = 176
 const TERRAIN_SEG_Z = 244
-const SIGHT_RADIUS = 128
-/** 거리 비네트 완화 — 멀리·그림자 느낌 영역이 덜 짙게 */
-const VISION_VIG_POWER = 0.32
+/** 구형 엔티티·픽업 등 거리 상한(성능) — 거리만으로 안 숨김 */
+const VIEW_RANGE_SQ = (Math.max(MAP_HALF_X, MAP_HALF_Z) * 2.35) ** 2
 /** 언덕·높이 차에 덜 끊기도록 완화 */
 const VISION_HEIGHT_SLACK = 0.34
-const VISION_MIN_FACTOR = 0.006
 /** 목표가 눈높이 이하일 때 시야선 가림 판정 완화 (낮은 언덕·골 더 잘 보임) */
 const VISION_LOOKDOWN_RELAX_Y = 0.28
 const VISION_LOOKDOWN_LOS_EPS = 0.36
@@ -441,18 +439,9 @@ function terrainHeight(x, z) {
   return THREE.MathUtils.clamp(h, -0.15, 4.25)
 }
 
-function sightVignetteFactor(eyeX, eyeZ, targetX, targetZ) {
-  const d = Math.hypot(targetX - eyeX, targetZ - eyeZ)
-  if (d >= SIGHT_RADIUS) return 0
-  return Math.pow(1 - d / SIGHT_RADIUS, VISION_VIG_POWER)
-}
-
-/** 눈보다 높은 지형·목표는 절대 안 보임 + 거리 비네트 + 중간 지형 가림 */
-function terrainLineOfSight(eyeX, eyeY, eyeZ, targetX, targetY, targetZ) {
+/** 지형 능선에 가려지면 false (거리 비네트 없음) */
+function terrainRayClear(eyeX, eyeY, eyeZ, targetX, targetY, targetZ) {
   if (targetY > eyeY + VISION_HEIGHT_SLACK) return false
-  const vf = sightVignetteFactor(eyeX, eyeZ, targetX, targetZ)
-  if (vf < VISION_MIN_FACTOR) return false
-
   const dx = targetX - eyeX
   const dy = targetY - eyeY
   const dz = targetZ - eyeZ
@@ -467,6 +456,52 @@ function terrainLineOfSight(eyeX, eyeY, eyeZ, targetX, targetY, targetZ) {
     const yGround = terrainHeight(x, z)
     if (yGround > yLine + losEps) return false
   }
+  return true
+}
+
+function pillarBlocksSegment(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, col) {
+  const r = col.r + 0.14
+  const px = col.x
+  const pz = col.z
+  const abx = targetX - eyeX
+  const abz = targetZ - eyeZ
+  const acx = eyeX - px
+  const acz = eyeZ - pz
+  const a = abx * abx + abz * abz
+  if (a < 1e-14) return false
+  const b = 2 * (acx * abx + acz * abz)
+  const c = acx * acx + acz * acz - r * r
+  const disc = b * b - 4 * a * c
+  if (disc <= 0) return false
+  const s = Math.sqrt(disc)
+  let t0 = (-b - s) / (2 * a)
+  let t1 = (-b + s) / (2 * a)
+  if (t0 > t1) [t0, t1] = [t1, t0]
+  const lo = Math.max(0, t0)
+  const hi = Math.min(1, t1)
+  if (hi < 1e-4 || lo > 1 - 1e-4 || lo > hi) return false
+  const yb = terrainHeight(px, pz)
+  const yt = yb + PILLAR_HEIGHT
+  const dy = targetY - eyeY
+  const yLo = eyeY + lo * dy
+  const yHi = eyeY + hi * dy
+  const ymin = Math.min(yLo, yHi)
+  const ymax = Math.max(yLo, yHi)
+  if (ymax < yb - 0.06 || ymin > yt + 0.06) return false
+  return true
+}
+
+function pillarsBlockRay(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, pillars) {
+  for (const col of pillars) {
+    if (pillarBlocksSegment(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, col)) return true
+  }
+  return false
+}
+
+/** 지형 + 기둥 장애물 뒤면 안 보임 (거리 페이드 없음) */
+function worldEntityVisible(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, pillars) {
+  if (!terrainRayClear(eyeX, eyeY, eyeZ, targetX, targetY, targetZ)) return false
+  if (pillarsBlockRay(eyeX, eyeY, eyeZ, targetX, targetY, targetZ, pillars)) return false
   return true
 }
 
@@ -538,7 +573,7 @@ function randomHpPackXZ(pillars) {
 const MMO_REMOTE_MAX = 64
 const mmoInstDummy = new THREE.Object3D()
 
-function MmoRemoteInstancedMesh({ peersRef, mySlot }) {
+function MmoRemoteInstancedMesh({ peersRef, mySlot, pillars, eyeRef }) {
   const meshRef = useRef(null)
   const geo = useMemo(() => new THREE.CapsuleGeometry(0.28, 0.75, 5, 10), [])
   const mat = useMemo(
@@ -558,15 +593,23 @@ function MmoRemoteInstancedMesh({ peersRef, mySlot }) {
     if (!mesh) return
     let i = 0
     const peers = peersRef?.current
-    if (peers && mySlot != null) {
+    const ek = eyeRef?.current
+    if (peers && mySlot != null && ek && pillars) {
       for (const [slot, pose] of peers) {
         if (slot === mySlot) continue
         if (!pose || typeof pose.x !== 'number' || typeof pose.z !== 'number') continue
         if (i >= MMO_REMOTE_MAX) break
         const y =
           typeof pose.y === 'number' ? pose.y : terrainHeight(pose.x, pose.z)
+        const bodyY = y + 0.75
+        const d2 = distXZSq(pose.x, pose.z, ek.x, ek.z)
+        const seen =
+          d2 <= VIEW_RANGE_SQ &&
+          worldEntityVisible(ek.x, ek.y, ek.z, pose.x, bodyY, pose.z, pillars)
+        const sc = seen ? 1 : 0
         mmoInstDummy.position.set(pose.x, y, pose.z)
         mmoInstDummy.rotation.set(0, pose.ry ?? 0, 0)
+        mmoInstDummy.scale.set(sc, sc, sc)
         mmoInstDummy.updateMatrix()
         mesh.setMatrixAt(i, mmoInstDummy.matrix)
         i++
@@ -581,7 +624,7 @@ function MmoRemoteInstancedMesh({ peersRef, mySlot }) {
   )
 }
 
-function HpPickupOrb({ id, pickupsRef, eyeRef }) {
+function HpPickupOrb({ id, pickupsRef, eyeRef, pillars }) {
   const g = useRef(null)
   useFrame((state) => {
     const pk = pickupsRef.current?.get(id)
@@ -599,8 +642,8 @@ function HpPickupOrb({ id, pickupsRef, eyeRef }) {
     const dx = pk.x - e.x
     const dz = pk.z - e.z
     const seen =
-      dx * dx + dz * dz <= SIGHT_RADIUS * SIGHT_RADIUS &&
-      terrainLineOfSight(e.x, e.y, e.z, pk.x, h, pk.z)
+      dx * dx + dz * dz <= VIEW_RANGE_SQ &&
+      worldEntityVisible(e.x, e.y, e.z, pk.x, h, pk.z, pillars)
     g.current.visible = seen
   })
   return (
@@ -630,7 +673,7 @@ function HpPickupOrb({ id, pickupsRef, eyeRef }) {
   )
 }
 
-function AmmoPickupOrb({ id, pickupsRef, eyeRef }) {
+function AmmoPickupOrb({ id, pickupsRef, eyeRef, pillars }) {
   const g = useRef(null)
   useFrame((state) => {
     const pk = pickupsRef.current?.get(id)
@@ -648,8 +691,8 @@ function AmmoPickupOrb({ id, pickupsRef, eyeRef }) {
     const dx = pk.x - e.x
     const dz = pk.z - e.z
     const seen =
-      dx * dx + dz * dz <= SIGHT_RADIUS * SIGHT_RADIUS &&
-      terrainLineOfSight(e.x, e.y, e.z, pk.x, h, pk.z)
+      dx * dx + dz * dz <= VIEW_RANGE_SQ &&
+      worldEntityVisible(e.x, e.y, e.z, pk.x, h, pk.z, pillars)
     g.current.visible = seen
   })
   return (
@@ -668,7 +711,7 @@ function AmmoPickupOrb({ id, pickupsRef, eyeRef }) {
   )
 }
 
-function LootCrateUnit({ id, cratesRef, eyeRef }) {
+function LootCrateUnit({ id, cratesRef, eyeRef, pillars }) {
   const g = useRef(null)
   useFrame(() => {
     const c = cratesRef.current?.get(id)
@@ -683,8 +726,8 @@ function LootCrateUnit({ id, cratesRef, eyeRef }) {
     const dz = c.z - ek.z
     const distSq = dx * dx + dz * dz
     const seen =
-      distSq <= SIGHT_RADIUS * SIGHT_RADIUS &&
-      terrainLineOfSight(ek.x, ek.y, ek.z, c.x, y, c.z)
+      distSq <= VIEW_RANGE_SQ &&
+      worldEntityVisible(ek.x, ek.y, ek.z, c.x, y, c.z, pillars)
     g.current.visible = seen
   })
   return (
@@ -1119,7 +1162,7 @@ function generatePillars() {
   return list
 }
 
-function CtfFlagVisual({ team, ctfRef, playerPosRef, player2PosRef, eyeRef, gameMode }) {
+function CtfFlagVisual({ team, ctfRef, playerPosRef, player2PosRef, eyeRef, gameMode, pillars }) {
   const rootRef = useRef(null)
   const colors = team === 0 ? ['#1565c0', '#42a5f5'] : ['#c62828', '#ff8a80']
 
@@ -1146,9 +1189,9 @@ function CtfFlagVisual({ team, ctfRef, playerPosRef, player2PosRef, eyeRef, game
     const e = eyeRef.current
     const dx = x - e.x
     const dz = z - e.z
-    const inR = dx * dx + dz * dz <= SIGHT_RADIUS * SIGHT_RADIUS
+    const inR = dx * dx + dz * dz <= VIEW_RANGE_SQ
     rootRef.current.visible =
-      inR && terrainLineOfSight(e.x, e.y, e.z, x, y + 0.6, z)
+      inR && worldEntityVisible(e.x, e.y, e.z, x, y + 0.6, z, pillars)
   })
 
   return (
@@ -1203,7 +1246,7 @@ function CtfFlagMapIndicator({ team, ctfRef, playerPosRef, player2PosRef, player
     rootRef.current.position.set(x, y, z)
     const e = playerEyeRef.current
     const d2 = distXZSq(x, z, e.x, e.z)
-    const far = SIGHT_RADIUS * 1.85
+    const far = Math.sqrt(VIEW_RANGE_SQ) * 1.12
     rootRef.current.visible = d2 <= far * far
   })
 
@@ -1246,7 +1289,7 @@ function CtfFlagMapIndicator({ team, ctfRef, playerPosRef, player2PosRef, player
   )
 }
 
-function CtfBaseZone({ team, eyeRef }) {
+function CtfBaseZone({ team, eyeRef, pillars }) {
   const meshRef = useRef(null)
   const bx = CTF_BASE_CENTER_X[team]
   const col = team === 0 ? '#1e88e5' : '#e53935'
@@ -1256,9 +1299,9 @@ function CtfBaseZone({ team, eyeRef }) {
     const y = terrainHeight(bx, 0) + 0.08
     meshRef.current.position.set(bx, y, 0)
     const e = eyeRef.current
-    const inR = distXZSq(bx, 0, e.x, e.z) <= SIGHT_RADIUS * SIGHT_RADIUS
+    const inR = distXZSq(bx, 0, e.x, e.z) <= VIEW_RANGE_SQ
     meshRef.current.visible =
-      inR && terrainLineOfSight(e.x, e.y, e.z, bx, y + 0.5, 0)
+      inR && worldEntityVisible(e.x, e.y, e.z, bx, y + 0.5, 0, pillars)
   })
 
   return (
@@ -1284,9 +1327,7 @@ function PillarLoS({ col, eyeRef }) {
     const e = eyeRef.current
     const ddx = col.x - e.x
     const ddz = col.z - e.z
-    const inR = ddx * ddx + ddz * ddz <= SIGHT_RADIUS * SIGHT_RADIUS
-    g.current.visible =
-      inR && terrainLineOfSight(e.x, e.y, e.z, col.x, cy, col.z)
+    g.current.visible = ddx * ddx + ddz * ddz <= VIEW_RANGE_SQ
   })
   return (
     <group ref={g}>
@@ -1344,7 +1385,7 @@ function CameraRig({ targetRef, zoomTargetRef, orbitYawRef, orbitPitchRef, hitFx
   return null
 }
 
-function BulletMesh({ id, bulletsRef, eyeRef }) {
+function BulletMesh({ id, bulletsRef, eyeRef, pillars }) {
   const meshRef = useRef(null)
   const matRef = useRef(null)
   const up = useMemo(() => new THREE.Vector3(0, 1, 0), [])
@@ -1364,9 +1405,9 @@ function BulletMesh({ id, bulletsRef, eyeRef }) {
     const e = eyeRef.current
     const ddx = b.pos.x - e.x
     const ddz = b.pos.z - e.z
-    const inR = ddx * ddx + ddz * ddz <= SIGHT_RADIUS * SIGHT_RADIUS
+    const inR = ddx * ddx + ddz * ddz <= VIEW_RANGE_SQ
     meshRef.current.visible =
-      inR && terrainLineOfSight(e.x, e.y, e.z, b.pos.x, b.pos.y, b.pos.z)
+      inR && worldEntityVisible(e.x, e.y, e.z, b.pos.x, b.pos.y, b.pos.z, pillars)
     if (matRef.current) {
       matRef.current.color.set(b.color ?? '#e02020')
       matRef.current.emissive.set(b.emissive ?? '#600000')
@@ -1381,7 +1422,7 @@ function BulletMesh({ id, bulletsRef, eyeRef }) {
   )
 }
 
-function EnemyUnit({ id, enemiesRef, eyeRef }) {
+function EnemyUnit({ id, enemiesRef, eyeRef, pillars }) {
   const bodyRef = useRef(null)
   const boxRef = useRef(null)
   const barRootRef = useRef(null)
@@ -1409,11 +1450,11 @@ function EnemyUnit({ id, enemiesRef, eyeRef }) {
     const ddx = e.pos.x - ek.x
     const ddz = e.pos.z - ek.z
     const distSq = ddx * ddx + ddz * ddz
-    const inRange = distSq <= SIGHT_RADIUS * SIGHT_RADIUS
+    const inRange = distSq <= VIEW_RANGE_SQ
     const bodySeen =
-      inRange && terrainLineOfSight(ek.x, ek.y, ek.z, e.pos.x, e.pos.y, e.pos.z)
+      inRange && worldEntityVisible(ek.x, ek.y, ek.z, e.pos.x, e.pos.y, e.pos.z, pillars)
     if (bodyRef.current) bodyRef.current.visible = bodySeen
-    if (barRootRef.current) barRootRef.current.visible = inRange
+    if (barRootRef.current) barRootRef.current.visible = bodySeen
   })
 
   return (
@@ -1463,8 +1504,8 @@ function EnemyUnit({ id, enemiesRef, eyeRef }) {
   )
 }
 
-/** CTF 상대 체력바 (거리만 체크 — 언덕 뒤에도 체력은 보임) */
-function CtfRemoteHpBar({ posRef, statsRef, eyeRef }) {
+/** CTF 상대 체력바 — 지형·기둥에 가려지면 숨김 */
+function CtfRemoteHpBar({ posRef, statsRef, eyeRef, pillars }) {
   const barRootRef = useRef(null)
   const greenFillRef = useRef(null)
   const { camera } = useThree()
@@ -1481,8 +1522,13 @@ function CtfRemoteHpBar({ posRef, statsRef, eyeRef }) {
       greenFillRef.current.position.x = (BAR_WIDTH / 2) * (ratio - 1)
     }
     const ek = eyeRef.current
-    const inRange = distXZSq(p.x, p.z, ek.x, ek.z) <= SIGHT_RADIUS * SIGHT_RADIUS
-    barRootRef.current.visible = inRange && st.alive
+    const bodyY = p.y + ENEMY_HALF.y
+    const inRange = distXZSq(p.x, p.z, ek.x, ek.z) <= VIEW_RANGE_SQ
+    const seen =
+      inRange &&
+      st.alive &&
+      worldEntityVisible(ek.x, ek.y, ek.z, p.x, bodyY, p.z, pillars)
+    barRootRef.current.visible = seen
   })
 
   return (
@@ -1511,7 +1557,7 @@ function CtfRemoteHpBar({ posRef, statsRef, eyeRef }) {
 }
 
 /** 플레이어 캡슐 머리 위 — EnemyUnit과 동일한 직사각형 HP 바 */
-function PlayerOverheadHpBar({ posRef, statsRef, eyeRef, requireAlive = true }) {
+function PlayerOverheadHpBar({ posRef, statsRef, eyeRef, pillars, requireAlive = true }) {
   const barRootRef = useRef(null)
   const greenFillRef = useRef(null)
   const { camera } = useThree()
@@ -1536,9 +1582,9 @@ function PlayerOverheadHpBar({ posRef, statsRef, eyeRef, requireAlive = true }) 
     const e = eyeRef.current
     const ddx = p.x - e.x
     const ddz = p.z - e.z
-    const inRange = ddx * ddx + ddz * ddz <= SIGHT_RADIUS * SIGHT_RADIUS
+    const inRange = ddx * ddx + ddz * ddz <= VIEW_RANGE_SQ
     const bodyY = p.y + 0.75
-    const seen = inRange && terrainLineOfSight(e.x, e.y, e.z, p.x, bodyY, p.z)
+    const seen = inRange && worldEntityVisible(e.x, e.y, e.z, p.x, bodyY, p.z, pillars)
     if (requireAlive) {
       barRootRef.current.visible = inRange && seen && alive
     } else {
@@ -1582,6 +1628,43 @@ function PlayerOverheadHpBar({ posRef, statsRef, eyeRef, requireAlive = true }) 
       </mesh>
     </group>
   )
+}
+
+/** CTF: 상대 캡슐만 지형·기둥에 가려지면 숨김 (내 모델은 항상 표시) */
+function CtfOpponentBodyVisibility({
+  gameMode,
+  networkSlot,
+  playerRef,
+  player2Ref,
+  playerPos,
+  player2Pos,
+  eyeRef,
+  pillars,
+}) {
+  useFrame(() => {
+    if (!pillars?.length) return
+    const setVis = (ref, pos) => {
+      if (!ref.current) return
+      const e = eyeRef.current
+      const bodyY = pos.y + 0.75
+      const d2 = distXZSq(pos.x, pos.z, e.x, e.z)
+      ref.current.visible =
+        d2 <= VIEW_RANGE_SQ && worldEntityVisible(e.x, e.y, e.z, pos.x, bodyY, pos.z, pillars)
+    }
+    if (!isCtfGameMode(gameMode)) {
+      if (playerRef.current) playerRef.current.visible = true
+      if (player2Ref.current) player2Ref.current.visible = true
+      return
+    }
+    if (gameMode === GAME_MODE_CTF_ONLINE && networkSlot === 1) {
+      setVis(playerRef, playerPos.current)
+      if (player2Ref.current) player2Ref.current.visible = true
+    } else {
+      if (playerRef.current) playerRef.current.visible = true
+      setVis(player2Ref, player2Pos.current)
+    }
+  })
+  return null
 }
 
 function packCtfForNet(flags) {
@@ -1635,7 +1718,6 @@ function GameScene({
   const camOrbitYawRef = useRef(0)
   const camOrbitPitchRef = useRef(0)
   const terrainMeshRef = useRef(null)
-  const terrainUniformsRef = useRef(null)
   const playerEyeWorld = useRef(new THREE.Vector3())
   const playerRef = useRef(null)
   const player2Ref = useRef(null)
@@ -2903,11 +2985,6 @@ function GameScene({
     } else {
       playerEyeWorld.current.set(p.x, p.y + PLAYER_EYE_LIFT, p.z)
     }
-    const tu = terrainUniformsRef.current
-    if (tu && tu.uEyePos) {
-      tu.uEyePos.value.copy(playerEyeWorld.current)
-    }
-
     const ind = moveIndicator.current
     ind.time -= delta
     if (moveArrowRef.current && moveArrowMatRef.current) {
@@ -2916,8 +2993,8 @@ function GameScene({
         const mx = ind.pos.x - e.x
         const mz = ind.pos.z - e.z
         const arrSeen =
-          mx * mx + mz * mz <= SIGHT_RADIUS * SIGHT_RADIUS &&
-          terrainLineOfSight(e.x, e.y, e.z, ind.pos.x, ind.pos.y, ind.pos.z)
+          mx * mx + mz * mz <= VIEW_RANGE_SQ &&
+          worldEntityVisible(e.x, e.y, e.z, ind.pos.x, ind.pos.y, ind.pos.z, pillars)
         moveArrowRef.current.visible = arrSeen
         moveArrowRef.current.position.set(ind.pos.x, ind.pos.y, ind.pos.z)
         moveArrowRef.current.rotation.y = ind.rotY + Math.PI
@@ -3415,11 +3492,6 @@ function GameScene({
           metalness={0.05}
           fog={false}
           onBeforeCompile={(shader) => {
-            shader.uniforms.uEyePos = { value: new THREE.Vector3(0, 2.5, 0) }
-            shader.uniforms.uSightRadius = { value: SIGHT_RADIUS }
-            shader.uniforms.uVisionVigPower = { value: VISION_VIG_POWER }
-            shader.uniforms.uHeightSlack = { value: VISION_HEIGHT_SLACK }
-            terrainUniformsRef.current = shader.uniforms
             shader.vertexShader =
               'varying vec3 vTerrainWPos;\n' +
               shader.vertexShader.replace(
@@ -3429,65 +3501,16 @@ function GameScene({
                 #include <clipping_planes_vertex>
                 `,
               )
-            const terrainPrelude =
-              `
-              varying vec3 vTerrainWPos;
-              uniform vec3 uEyePos;
-              uniform float uSightRadius;
-              uniform float uVisionVigPower;
-              uniform float uHeightSlack;
-
-              float terrainH(float x, float z) {
-                float h = 0.0;
-                h += sin(x * 0.092) * cos(z * 0.088) * 2.35;
-                h += sin(x * 0.047 + 0.9) * sin(z * 0.053) * 1.95;
-                h += cos(x * 0.11 + z * 0.09) * 1.15;
-                h += sin((x + z) * 0.062) * 0.85;
-                h += sin((x * x + z * z) * 0.00085) * 0.55;
-                return clamp(h, -0.15, 4.25);
-              }
-              `
-            let frag = terrainPrelude + shader.fragmentShader
-            frag = frag.replace(
-              '#include <opaque_fragment>',
-              `
-              float terrainVis = 1.0;
-              {
-                vec3 teye = uEyePos;
-                vec3 ttgt = vTerrainWPos;
-                float dFlat = distance(ttgt.xz, teye.xz);
-                float dn = dFlat / uSightRadius;
-                float inRange = pow(max(0.0, 1.0 - dn), uVisionVigPower);
-                float heightOk = 1.0 - step(teye.y + uHeightSlack, ttgt.y);
-                float lookDown = 1.0 - step(teye.y + 0.28, ttgt.y);
-                float blockEps = mix(0.095, 0.36, lookDown);
-                float blocked = 0.0;
-                for (int i = 1; i < 49; i++) {
-                  float t = float(i) / 49.0;
-                  vec3 p = mix(teye, ttgt, t);
-                  float yg = terrainH(p.x, p.z);
-                  if (yg > p.y + blockEps) blocked = 1.0;
-                }
-                terrainVis = inRange * heightOk * (1.0 - blocked);
-                float lowFloor = lookDown * inRange * 0.84;
-                terrainVis = max(terrainVis, lowFloor);
-              }
-              outgoingLight *= terrainVis;
-              if (terrainVis > 0.02) {
+            shader.fragmentShader =
+              'varying vec3 vTerrainWPos;\n' +
+              shader.fragmentShader.replace(
+                '#include <opaque_fragment>',
+                `
                 float hi = smoothstep(-0.15, 3.2, vTerrainWPos.y);
                 outgoingLight *= mix(0.93, 1.12, hi);
-              }
-              #include <opaque_fragment>
-              `,
-            )
-            frag = frag.replace(
-              '#include <dithering_fragment>',
-              `
-              gl_FragColor.rgb *= terrainVis;
-              #include <dithering_fragment>
-              `,
-            )
-            shader.fragmentShader = frag
+                #include <opaque_fragment>
+                `,
+              )
           }}
         />
       </mesh>
@@ -3495,8 +3518,8 @@ function GameScene({
       {isCtfGameMode(gameMode) && (
         <>
           <CtfTerritoryTint />
-          <CtfBaseZone team={0} eyeRef={playerEyeWorld} />
-          <CtfBaseZone team={1} eyeRef={playerEyeWorld} />
+          <CtfBaseZone team={0} eyeRef={playerEyeWorld} pillars={pillars} />
+          <CtfBaseZone team={1} eyeRef={playerEyeWorld} pillars={pillars} />
           <CtfFlagVisual
             team={0}
             ctfRef={ctfRef}
@@ -3504,6 +3527,7 @@ function GameScene({
             player2PosRef={player2Pos}
             eyeRef={playerEyeWorld}
             gameMode={gameMode}
+            pillars={pillars}
           />
           <CtfFlagVisual
             team={1}
@@ -3512,6 +3536,7 @@ function GameScene({
             player2PosRef={player2Pos}
             eyeRef={playerEyeWorld}
             gameMode={gameMode}
+            pillars={pillars}
           />
           <CtfFlagMapIndicator
             team={0}
@@ -3533,13 +3558,28 @@ function GameScene({
       )}
 
       {gameMode === GAME_MODE_CTF_ONLINE && (
-        <CtfRemoteHpBar posRef={oppPosRef} statsRef={oppStatsRef} eyeRef={playerEyeWorld} />
+        <CtfRemoteHpBar
+          posRef={oppPosRef}
+          statsRef={oppStatsRef}
+          eyeRef={playerEyeWorld}
+          pillars={pillars}
+        />
       )}
 
       {gameMode === GAME_MODE_CTF && (
         <>
-          <PlayerOverheadHpBar posRef={playerPos} statsRef={ctfP0StatsRef} eyeRef={playerEyeWorld} />
-          <PlayerOverheadHpBar posRef={player2Pos} statsRef={ctfP1StatsRef} eyeRef={playerEyeWorld} />
+          <PlayerOverheadHpBar
+            posRef={playerPos}
+            statsRef={ctfP0StatsRef}
+            eyeRef={playerEyeWorld}
+            pillars={pillars}
+          />
+          <PlayerOverheadHpBar
+            posRef={player2Pos}
+            statsRef={ctfP1StatsRef}
+            eyeRef={playerEyeWorld}
+            pillars={pillars}
+          />
         </>
       )}
       {gameMode === GAME_MODE_CTF_ONLINE && (
@@ -3547,6 +3587,7 @@ function GameScene({
           posRef={networkSlot === 1 ? player2Pos : playerPos}
           statsRef={networkSlot === 1 ? ctfP1StatsRef : ctfP0StatsRef}
           eyeRef={playerEyeWorld}
+          pillars={pillars}
           requireAlive
         />
       )}
@@ -3555,6 +3596,7 @@ function GameScene({
           posRef={playerPos}
           statsRef={worldSurvivalStatsRef}
           eyeRef={playerEyeWorld}
+          pillars={pillars}
           requireAlive={false}
         />
       )}
@@ -3686,7 +3728,25 @@ function GameScene({
       </group>
 
       {gameMode === GAME_MODE_MMO_ONLINE && networkSlot != null && remoteMmoPeersRef && (
-        <MmoRemoteInstancedMesh peersRef={remoteMmoPeersRef} mySlot={networkSlot} />
+        <MmoRemoteInstancedMesh
+          peersRef={remoteMmoPeersRef}
+          mySlot={networkSlot}
+          pillars={pillars}
+          eyeRef={playerEyeWorld}
+        />
+      )}
+
+      {isCtfGameMode(gameMode) && (
+        <CtfOpponentBodyVisibility
+          gameMode={gameMode}
+          networkSlot={networkSlot}
+          playerRef={playerRef}
+          player2Ref={player2Ref}
+          playerPos={playerPos}
+          player2Pos={player2Pos}
+          eyeRef={playerEyeWorld}
+          pillars={pillars}
+        />
       )}
 
       {isCtfGameMode(gameMode) && (
@@ -3726,25 +3786,43 @@ function GameScene({
 
       {!isCtfGameMode(gameMode) &&
         hpPickupIdList.map((hid) => (
-          <HpPickupOrb key={hid} id={hid} pickupsRef={hpPickupsRef} eyeRef={playerEyeWorld} />
+          <HpPickupOrb
+            key={hid}
+            id={hid}
+            pickupsRef={hpPickupsRef}
+            eyeRef={playerEyeWorld}
+            pillars={pillars}
+          />
         ))}
 
       {!isCtfGameMode(gameMode) &&
         ammoPickupIds.map((aid) => (
-          <AmmoPickupOrb key={aid} id={aid} pickupsRef={ammoPickupsRef} eyeRef={playerEyeWorld} />
+          <AmmoPickupOrb
+            key={aid}
+            id={aid}
+            pickupsRef={ammoPickupsRef}
+            eyeRef={playerEyeWorld}
+            pillars={pillars}
+          />
         ))}
 
       {!isCtfGameMode(gameMode) &&
         crateIds.map((cid) => (
-          <LootCrateUnit key={cid} id={cid} cratesRef={cratesRef} eyeRef={playerEyeWorld} />
+          <LootCrateUnit
+            key={cid}
+            id={cid}
+            cratesRef={cratesRef}
+            eyeRef={playerEyeWorld}
+            pillars={pillars}
+          />
         ))}
 
       {enemyIds.map((id) => (
-        <EnemyUnit key={id} id={id} enemiesRef={enemies} eyeRef={playerEyeWorld} />
+        <EnemyUnit key={id} id={id} enemiesRef={enemies} eyeRef={playerEyeWorld} pillars={pillars} />
       ))}
 
       {bulletIds.map((id) => (
-        <BulletMesh key={id} id={id} bulletsRef={bullets} eyeRef={playerEyeWorld} />
+        <BulletMesh key={id} id={id} bulletsRef={bullets} eyeRef={playerEyeWorld} pillars={pillars} />
       ))}
     </>
   )
