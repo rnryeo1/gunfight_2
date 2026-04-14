@@ -215,20 +215,21 @@ const WORLD_HP_PICKUP_RADIUS = 1.38
 const WORLD_HP_PICKUP_COUNT = 36
 const WORLD_HP_PICKUP_RESPAWN_SEC_MIN = 2.5
 const WORLD_HP_PICKUP_RESPAWN_SEC_MAX = 5.8
-/** 솔로: 보급 상자 · 몽둥이 · 공용 탄약 */
+/** 솔로: 보급 상자 · 몽둥이 · 기관/스나 탄약 각각 */
 const WORLD_LOOT_CRATE_COUNT = 12
 /** MMO: 같은 맵에 유저가 많을 때 보급 상자 추가 */
 const WORLD_LOOT_CRATE_COUNT_MMO = 22
 const CRATE_HALF = { x: 0.52, y: 0.55, z: 0.52 }
 /** 적 처치 시 생존 HP 회복 (솔로/MMO) */
 const ENEMY_KILL_HEAL = 20
-/** 보급 상자로 해당 무기 획득 시 공용 탄약 풀에 더해지는 양 */
+/** 보급 상자로 기관총 획득 시 기관 탄창에 더해지는 발수 */
 const MG_START_AMMO = 30
+/** 보급 상자로 스나이퍼 획득 시 스나 탄창에 더해지는 발수 */
 const SNIPER_START_AMMO = 7
-/** 솔로/MMO: 처음부터 기관+스나 보유 시 공용 탄약 풀 초기값 */
-const WORLD_START_AMMO_TOTAL = MG_START_AMMO + SNIPER_START_AMMO
 const AMMO_PICKUP_RADIUS = 1.34
-const AMMO_DROP_ENEMY_AMOUNT = 24
+/** 적 처치 드롭 오브가 각각 보충하는 발수(기관·스나 별도) */
+const AMMO_DROP_ORB_MG = 24
+const AMMO_DROP_ORB_SNIPER = 7
 const CLUB_MELEE_RANGE = 3.93
 const CLUB_MELEE_COS = Math.cos((50 * Math.PI) / 180)
 const CLUB_MELEE_DAMAGE = 15
@@ -359,11 +360,11 @@ function grantWorldCrateLoot(loadoutRef, currentWeaponIdRef) {
   const L = loadoutRef.current
   if (Math.random() < 0.5) {
     L.ownedMg = true
-    L.ammo += MG_START_AMMO
+    L.mgAmmo += MG_START_AMMO
     currentWeaponIdRef.current = 'mg'
   } else {
     L.ownedSniper = true
-    L.ammo += SNIPER_START_AMMO
+    L.sniperAmmo += SNIPER_START_AMMO
     currentWeaponIdRef.current = 'sniper'
   }
 }
@@ -1769,7 +1770,8 @@ function GameScene({
   const loadoutRef = useRef({
     ownedMg: false,
     ownedSniper: false,
-    ammo: 0,
+    mgAmmo: 0,
+    sniperAmmo: 0,
   })
   const clubSwingP0Ref = useRef(createClubSwingState())
   const clubSwingP1Ref = useRef(createClubSwingState())
@@ -1826,7 +1828,8 @@ function GameScene({
     loadoutRef.current = {
       ownedMg: true,
       ownedSniper: true,
-      ammo: WORLD_START_AMMO_TOTAL,
+      mgAmmo: MG_START_AMMO,
+      sniperAmmo: SNIPER_START_AMMO,
     }
     currentWeaponId.current = 'club'
     p0VertVelRef.current = 0
@@ -1902,7 +1905,8 @@ function GameScene({
         const L = loadoutRef.current
         if (wid === 'mg' && !L.ownedMg) return
         if (wid === 'sniper' && !L.ownedSniper) return
-        if ((wid === 'mg' || wid === 'sniper') && L.ammo <= 0) return
+        if (wid === 'mg' && L.mgAmmo <= 0) return
+        if (wid === 'sniper' && L.sniperAmmo <= 0) return
       }
 
       const t = nowSec()
@@ -1912,8 +1916,9 @@ function GameScene({
       const g = terrainHeight(pos.x, pos.z)
       const origin = new THREE.Vector3(pos.x, g + 0.75, pos.z)
 
-      if (worldLoot && (wid === 'mg' || wid === 'sniper')) {
-        loadoutRef.current.ammo -= 1
+      if (worldLoot) {
+        if (wid === 'mg') loadoutRef.current.mgAmmo -= 1
+        else if (wid === 'sniper') loadoutRef.current.sniperAmmo -= 1
       }
 
       fireCooldownStartByWeapon.current[wid] = t
@@ -2288,7 +2293,9 @@ function GameScene({
         const dx = p.x - pk.x
         const dz = p.z - pk.z
         if (dx * dx + dz * dz <= AMMO_PICKUP_RADIUS * AMMO_PICKUP_RADIUS) {
-          loadoutRef.current.ammo += pk.amount ?? AMMO_DROP_ENEMY_AMOUNT
+          const L = loadoutRef.current
+          L.mgAmmo += pk.mg ?? AMMO_DROP_ORB_MG
+          L.sniperAmmo += pk.sniper ?? AMMO_DROP_ORB_SNIPER
           ammoTaken.push(aid)
         }
       })
@@ -2428,7 +2435,8 @@ function GameScene({
             ammoPickupsRef.current.set(aid, {
               x: d.x,
               z: d.z,
-              amount: AMMO_DROP_ENEMY_AMOUNT,
+              mg: AMMO_DROP_ORB_MG,
+              sniper: AMMO_DROP_ORB_SNIPER,
               respawnUntil: 0,
             })
             addIds.push(aid)
@@ -3024,7 +3032,7 @@ function GameScene({
       } else {
         const L = loadoutRef.current
         const own = `${L.ownedMg ? '기관O' : '기관X'} · ${L.ownedSniper ? '스나O' : '스나X'}`
-        const ammoTxt = `탄약 ${L.ammo} · ${own}`
+        const ammoTxt = `기관 ${L.mgAmmo} · 스나 ${L.sniperAmmo} · ${own}`
         statusEl.textContent = cdRemain > 0.02 ? `쿨 ${cdRemain.toFixed(2)}s — ${ammoTxt}` : ammoTxt
       }
     }
@@ -3115,7 +3123,8 @@ function GameScene({
               ammoPickupsRef.current.set(aid, {
                 x: ex,
                 z: ez,
-                amount: AMMO_DROP_ENEMY_AMOUNT,
+                mg: AMMO_DROP_ORB_MG,
+                sniper: AMMO_DROP_ORB_SNIPER,
                 respawnUntil: 0,
               })
               setAmmoPickupIds((prev) => [...prev, aid])
@@ -4215,7 +4224,7 @@ export default function App() {
         <div style={{ fontSize: 10, opacity: 0.55, marginTop: 6 }}>
           {isCtfGameMode(gameMode)
             ? '숫자 1 · 스나이퍼 / 숫자 2 · 기관총'
-            : '스페이스 점프 · 1·스나 2·기관 3·몽둥이 · 탄 공용 · 기관·스나 1발당 탄1 · 상자는 탄 보충'}
+            : '스페이스 점프 · 1·스나 2·기관 3·몽둥이 · 기관/스나 탄창 분리 · 처치 드롭·상자로 보충'}
         </div>
       </div>
       {(gameMode === GAME_MODE_SOLO || gameMode === GAME_MODE_MMO_ONLINE) && (
