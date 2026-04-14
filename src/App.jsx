@@ -104,9 +104,9 @@ const CAM_OFFSET = new THREE.Vector3(14, 16, 14)
 const CAM_ZOOM_MIN = 0.5
 const CAM_ZOOM_MAX = 1.72
 const CAM_ZOOM_PER_NOTCH = 1.06
-/** 좌클릭 드래그(이동 클릭 유지) 시 카메라 수평 회전 (라디안/픽셀) */
+/** 우클릭 드래그 시 카메라 수평 회전 (라디안/픽셀, 마우스 오른쪽으로 당기면 시계 방향 궤도) */
 const CAM_ORBIT_YAW_PER_PX = 0.0021
-/** 좌클릭 드래그 시 카메라 수직 회전 (라디안/픽셀) */
+/** 우클릭 드래그 시 카메라 수직 회전 (라디안/픽셀, 마우스를 아래로 당기면 아래를 더 내려다봄) */
 const CAM_ORBIT_PITCH_PER_PX = 0.0021
 /** 추가 피치 상한·하한 (라디안, 기본 오프셋 기준) */
 const CAM_ORBIT_PITCH_MIN = -1.25
@@ -222,8 +222,11 @@ const WORLD_LOOT_CRATE_COUNT_MMO = 22
 const CRATE_HALF = { x: 0.52, y: 0.55, z: 0.52 }
 /** 적 처치 시 생존 HP 회복 (솔로/MMO) */
 const ENEMY_KILL_HEAL = 20
+/** 보급 상자로 해당 무기 획득 시 공용 탄약 풀에 더해지는 양 */
 const MG_START_AMMO = 30
-const SNIPER_START_AMMO = 10
+const SNIPER_START_AMMO = 7
+/** 솔로/MMO: 처음부터 기관+스나 보유 시 공용 탄약 풀 초기값 */
+const WORLD_START_AMMO_TOTAL = MG_START_AMMO + SNIPER_START_AMMO
 const AMMO_PICKUP_RADIUS = 1.34
 const AMMO_DROP_ENEMY_AMOUNT = 24
 const CLUB_MELEE_RANGE = 3.93
@@ -314,7 +317,7 @@ const WEAPONS = {
   mg: {
     id: 'mg',
     name: '기관총',
-    keyLabel: '1',
+    keyLabel: '2',
     cooldown: 0.2,
     damage: 10,
     speed: 24,
@@ -327,7 +330,7 @@ const WEAPONS = {
   sniper: {
     id: 'sniper',
     name: '스나이퍼',
-    keyLabel: '2',
+    keyLabel: '1',
     cooldown: 2,
     damage: 50,
     speed: 40,
@@ -1672,8 +1675,7 @@ function GameScene({
     rotY: 0,
   })
 
-  /** 좌클릭으로 이동 지점 찍은 뒤 드래그 중이면 true (카메라 궤도) */
-  const moveDragHeldRef = useRef(false)
+  const rmbHeldRef = useRef(false)
   const lastMpSendRef = useRef(0)
 
   const lastPointerGroundRef = useRef(new THREE.Vector3())
@@ -1768,7 +1770,6 @@ function GameScene({
     ownedMg: false,
     ownedSniper: false,
     ammo: 0,
-    mgBurstLeft: 0,
   })
   const clubSwingP0Ref = useRef(createClubSwingState())
   const clubSwingP1Ref = useRef(createClubSwingState())
@@ -1823,10 +1824,9 @@ function GameScene({
       return
     }
     loadoutRef.current = {
-      ownedMg: false,
-      ownedSniper: false,
-      ammo: 0,
-      mgBurstLeft: 0,
+      ownedMg: true,
+      ownedSniper: true,
+      ammo: WORLD_START_AMMO_TOTAL,
     }
     currentWeaponId.current = 'club'
     p0VertVelRef.current = 0
@@ -1850,7 +1850,7 @@ function GameScene({
 
   useEffect(() => {
     const up = (e) => {
-      if (e.button === 0) moveDragHeldRef.current = false
+      if (e.button === 2) rmbHeldRef.current = false
     }
     window.addEventListener('pointerup', up)
     return () => window.removeEventListener('pointerup', up)
@@ -1902,11 +1902,7 @@ function GameScene({
         const L = loadoutRef.current
         if (wid === 'mg' && !L.ownedMg) return
         if (wid === 'sniper' && !L.ownedSniper) return
-        if (wid === 'mg') {
-          if (L.mgBurstLeft <= 0 && L.ammo <= 0) return
-        } else if (wid === 'sniper') {
-          if (L.ammo <= 0) return
-        }
+        if ((wid === 'mg' || wid === 'sniper') && L.ammo <= 0) return
       }
 
       const t = nowSec()
@@ -1916,17 +1912,8 @@ function GameScene({
       const g = terrainHeight(pos.x, pos.z)
       const origin = new THREE.Vector3(pos.x, g + 0.75, pos.z)
 
-      if (worldLoot) {
-        const L = loadoutRef.current
-        if (wid === 'mg') {
-          if (L.mgBurstLeft <= 0) {
-            L.ammo -= 1
-            L.mgBurstLeft = 3
-          }
-          L.mgBurstLeft -= 1
-        } else if (wid === 'sniper') {
-          L.ammo -= 1
-        }
+      if (worldLoot && (wid === 'mg' || wid === 'sniper')) {
+        loadoutRef.current.ammo -= 1
       }
 
       fireCooldownStartByWeapon.current[wid] = t
@@ -1963,7 +1950,7 @@ function GameScene({
         lastPointerGroundRef.current.copy(pt)
         hasPointerGroundRef.current = true
       }
-      if (e.buttons & 1 && moveDragHeldRef.current) {
+      if (e.buttons & 2 && rmbHeldRef.current) {
         camOrbitYawRef.current -= e.movementX * CAM_ORBIT_YAW_PER_PX
         camOrbitPitchRef.current -= e.movementY * CAM_ORBIT_PITCH_PER_PX
         camOrbitPitchRef.current = THREE.MathUtils.clamp(
@@ -1991,10 +1978,16 @@ function GameScene({
         hasPointerGroundRef.current = true
       }
 
-      if (e.button === 0) {
+      if (e.button === 2) {
+        if (attackAimActiveRef.current && aimMarkerVisibleRef.current) {
+          aimMarkerVisibleRef.current = false
+          setGameCursor(CURSOR_RTS_GAUNTLET)
+          return
+        }
+
         if (!p) return
         if (onlineCtf && slot === 1) {
-          moveDragHeldRef.current = true
+          rmbHeldRef.current = true
           moveTarget.current.copy(p)
           ;[moveTarget.current.x, moveTarget.current.z] = clampXZToArena(
             moveTarget.current.x,
@@ -2010,7 +2003,7 @@ function GameScene({
           const p2 = player2Pos.current
           ind.rotY = Math.atan2(ind.pos.x - p2.x, ind.pos.z - p2.z)
         } else if (!onlineCtf || slot === 0) {
-          moveDragHeldRef.current = true
+          rmbHeldRef.current = true
           moveTarget.current.copy(p)
           ;[moveTarget.current.x, moveTarget.current.z] = clampXZToArena(
             moveTarget.current.x,
@@ -2028,7 +2021,7 @@ function GameScene({
             ind.pos.z - playerPos.current.z,
           )
         }
-      } else if (e.button === 2) {
+      } else if (e.button === 0) {
         const aimGround =
           p ||
           (hasPointerGroundRef.current ? lastPointerGroundRef.current : null)
@@ -2079,6 +2072,7 @@ function GameScene({
           clubMeleeQueuedP1Ref.current = { aim: false }
           return
         }
+        /* 기관/스나: A는 방향(마커·포인터) 보조만, 발사는 조준 모드와 무관 */
         const pos = fromP2 ? player2Pos.current : playerPos.current
         const bodyRef = fromP2 ? player2Ref : playerRef
         const g0 = terrainHeight(pos.x, pos.z)
@@ -2173,11 +2167,11 @@ function GameScene({
       if (isCtfGameMode(gameMode)) {
         if (gameMode === GAME_MODE_CTF) {
           if (e.code === 'Numpad1') {
-            currentWeaponIdP2.current = 'mg'
+            currentWeaponIdP2.current = 'sniper'
             return
           }
           if (e.code === 'Numpad2') {
-            currentWeaponIdP2.current = 'sniper'
+            currentWeaponIdP2.current = 'mg'
             return
           }
           if (e.code === 'Numpad3') {
@@ -2185,22 +2179,23 @@ function GameScene({
             return
           }
         }
-        if (e.code === 'Digit1' || e.code === 'Numpad1') next = 'mg'
-        if (e.code === 'Digit2' || e.code === 'Numpad2') next = 'sniper'
+        if (e.code === 'Digit1' || e.code === 'Numpad1') next = 'sniper'
+        if (e.code === 'Digit2' || e.code === 'Numpad2') next = 'mg'
         if (e.code === 'Digit3' || e.code === 'Numpad3') next = 'club'
       } else {
         if (e.code === 'Digit3' || e.code === 'Numpad3') next = 'club'
-        if ((e.code === 'Digit1' || e.code === 'Numpad1') && loadoutRef.current.ownedMg) next = 'mg'
-        if ((e.code === 'Digit2' || e.code === 'Numpad2') && loadoutRef.current.ownedSniper)
+        if ((e.code === 'Digit1' || e.code === 'Numpad1') && loadoutRef.current.ownedSniper)
           next = 'sniper'
+        if ((e.code === 'Digit2' || e.code === 'Numpad2') && loadoutRef.current.ownedMg) next = 'mg'
       }
       if (!next || next === currentWeaponId.current) return
       currentWeaponId.current = next
     }
-    window.addEventListener('keydown', onKeyDown)
+    // capture: 캔버스/포커스보다 먼저 처리 (로컬에서 키가 안 먹는 경우 완화)
+    document.addEventListener('keydown', onKeyDown, true)
     setGameCursor(CURSOR_RTS_GAUNTLET)
     return () => {
-      window.removeEventListener('keydown', onKeyDown)
+      document.removeEventListener('keydown', onKeyDown, true)
       setGameCursor(CURSOR_RTS_GAUNTLET)
     }
   }, [setGameCursor, gameMode, networkSlot])
@@ -2816,8 +2811,8 @@ function GameScene({
           ctfHint.textContent =
             '깃발: 우리 깃발이 기지에 있을 때만 적 깃발로 득점 · 드랍: 사망·스나이퍼 스턴 · 아군 깃발 바닥=즉시 복귀 · 깃발 들면 이동 20%↓' +
             (gameMode === GAME_MODE_CTF
-              ? ' · 스페이스 점프 · 주황: 패드0 점프 · 패드1·2·3 무기, F공격 · 몽둥이(패드3) 근접'
-              : ' · 스페이스 점프 · 1·2·3 무기 · 몽둥이(3) 근접')
+              ? ' · 스페이스 점프 · 주황: 패드0 점프 · 패드1스나·2기관·3몽 F공격'
+              : ' · 스페이스 점프 · 1스나·2기관·3몽')
         }
       }
     }
@@ -2846,7 +2841,7 @@ function GameScene({
         p.x += moveDelta.x
         p.z += moveDelta.z
 
-        if (!moveDragHeldRef.current && playerRef.current) {
+        if (!rmbHeldRef.current && playerRef.current) {
           playerRef.current.rotation.y = Math.atan2(moveDelta.x, moveDelta.z)
         }
       }
@@ -2863,7 +2858,7 @@ function GameScene({
         p2.x += moveDelta.x
         p2.z += moveDelta.z
 
-        if (!moveDragHeldRef.current && player2Ref.current) {
+        if (!rmbHeldRef.current && player2Ref.current) {
           player2Ref.current.rotation.y = Math.atan2(moveDelta.x, moveDelta.z)
         }
       }
@@ -2975,7 +2970,6 @@ function GameScene({
     const aimBodyRef = onlineCtf && slot === 1 ? player2Ref : playerRef
     if (
       attackAimActiveRef.current &&
-      aimMarkerVisibleRef.current &&
       hasPointerGroundRef.current &&
       aimBodyRef.current
     ) {
@@ -3029,9 +3023,8 @@ function GameScene({
           cdRemain > 0.02 ? `쿨타임 ${cdRemain.toFixed(2)}s` : '발사 가능'
       } else {
         const L = loadoutRef.current
-        const burst = L.mgBurstLeft > 0 ? ` · 기관3발묶음 ${L.mgBurstLeft}발 남음` : ''
         const own = `${L.ownedMg ? '기관O' : '기관X'} · ${L.ownedSniper ? '스나O' : '스나X'}`
-        const ammoTxt = `탄약 ${L.ammo}${burst} · ${own}`
+        const ammoTxt = `탄약 ${L.ammo} · ${own}`
         statusEl.textContent = cdRemain > 0.02 ? `쿨 ${cdRemain.toFixed(2)}s — ${ammoTxt}` : ammoTxt
       }
     }
@@ -3907,6 +3900,21 @@ export default function App() {
         }}
       >
         <h1 style={{ fontSize: 26, fontWeight: 700, margin: 0 }}>Gun Fight</h1>
+        {import.meta.env.DEV && (
+          <p
+            style={{
+              margin: 0,
+              fontSize: 11,
+              opacity: 0.62,
+              maxWidth: 520,
+              textAlign: 'center',
+              lineHeight: 1.45,
+              color: '#a8d4ff',
+            }}
+          >
+            <strong>dev</strong> — 이 화면이 보이면 Vite 로컬입니다. 솔로/MMO는 시작부터 1·2·3 무기 전환 가능.
+          </p>
+        )}
         <p style={{ opacity: 0.78, margin: 0, maxWidth: 560, textAlign: 'center', lineHeight: 1.55 }}>
           맵은 넓은 <strong style={{ fontWeight: 650 }}>오픈 필드</strong>입니다.{' '}
           <strong style={{ fontWeight: 650 }}>오픈월드 MMO</strong>는 같은 방에 여러 명이 동시에 들어와 탐험·사냥(릴레이 서버)하고,{' '}
@@ -4168,7 +4176,7 @@ export default function App() {
           }}
           style={{ fontSize: 15, fontWeight: 650, textShadow: '0 1px 2px #000' }}
         >
-          기관총  ·  [1]
+          {isCtfGameMode(gameMode) ? '기관총  ·  [2]' : '몽둥이  ·  [3]'}
         </div>
         <div
           ref={(el) => {
@@ -4206,8 +4214,8 @@ export default function App() {
         </div>
         <div style={{ fontSize: 10, opacity: 0.55, marginTop: 6 }}>
           {isCtfGameMode(gameMode)
-            ? '숫자 1 · 기관총 / 숫자 2 · 스나이퍼'
-            : '스페이스 점프 · 1·기관총 2·스나이퍼(상자) 3·몽둥이 · 탄 공용 · 기관 3발당 탄1'}
+            ? '숫자 1 · 스나이퍼 / 숫자 2 · 기관총'
+            : '스페이스 점프 · 1·스나 2·기관 3·몽둥이 · 탄 공용 · 기관·스나 1발당 탄1 · 상자는 탄 보충'}
         </div>
       </div>
       {(gameMode === GAME_MODE_SOLO || gameMode === GAME_MODE_MMO_ONLINE) && (
@@ -4337,23 +4345,23 @@ export default function App() {
       >
         {gameMode === GAME_MODE_MMO_ONLINE ? (
           <>
-            오픈월드 MMO · 생존 HP 1/초 감소 · 녹색 팩 +25 · 붉은 적 · 보라=다른 유저(PvP) · 좌클릭 이동·카메라 · A 조준 ·
-            우클릭 공격 · 1·2·3 무기
+            오픈월드 MMO · 생존 HP 1/초 감소 · 녹색 팩 +25 · 붉은 적 · 보라=다른 유저(PvP) · 우클릭 이동·카메라 · A 방향 ·
+            1스나·2기관·3몽
           </>
         ) : gameMode === GAME_MODE_CTF_ONLINE ? (
           <>
-            온라인 깃발 · 첫 입장=파랑(좌클릭 이동·드래그 방향·우클릭 공격) · 두 번째=주황(IJKL·F·좌클릭 이동·드래그·우클릭
-            공격) · A 조준 · 1·2 무기 · 상대 체력바는 머리 위 · 휠 시야 · 깃발·점수는 파랑(호스트) 기준 동기화
+            온라인 깃발 · 첫 입장=파랑(우클릭 이동·드래그로 방향) · 두 번째=주황(IJKL·F·우클릭 이동·드래그 방향) · A
+            방향 · 1스나·2기관 무기 · 상대 체력바는 머리 위 · 휠 시야 · 깃발·점수는 파랑(호스트) 기준 동기화
           </>
         ) : gameMode === GAME_MODE_CTF ? (
           <>
-            파랑(P1): A 조준 · 우클릭 공격 · 좌클릭 이동 · 좌클릭 드래그 시 방향 · 1·2 무기 · 스나이퍼 피격 시 스턴+깃발 드랍 ·
-            주황(P2): IJKL 이동 · F 기관총 · 휠 시야 · 좌하 미니맵 · 바닥 색: 서쪽 파랑=아군 · 동쪽 붉은=적 · 상대 체력바 머리
+            파랑(P1): A 방향 · 좌클릭 발사 · 우클릭 이동 · 우클릭 드래그 시 방향 · 1스나·2기관 · 스나이퍼 피격 시 스턴+깃발 드랍 ·
+            주황(P2): IJKL 이동 · F 발사(선택 무기) · 휠 시야 · 좌하 미니맵 · 바닥 색: 서쪽 파랑=아군 · 동쪽 붉은=적 · 상대 체력바 머리
             위
           </>
         ) : (
           <>
-            솔로 · 생존 HP 1/초 감소 · 녹색 회전 팩 +25(랜덤 위치) · A 조준 · 우클릭 공격 · 좌클릭 이동·카메라 · 1·2 무기 · 휠
+            솔로 · 생존 HP 1/초 감소 · 녹색 회전 팩 +25(랜덤 위치) · A 방향 · 좌클릭 발사 · 우클릭 이동·카메라 · 1스나·2기관 · 휠
             시야
           </>
         )}
