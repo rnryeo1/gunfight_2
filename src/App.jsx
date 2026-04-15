@@ -225,6 +225,9 @@ const WORLD_LOOT_CRATE_COUNT_MMO = 22
 const CRATE_HALF = { x: 0.52, y: 0.55, z: 0.52 }
 /** 적 처치 시 생존 HP 회복 (솔로/MMO) */
 const ENEMY_KILL_HEAL = 20
+/** 적 처치 시 로드아웃에 자동 보급되는 탄약 */
+const ENEMY_KILL_MG_AMMO = 20
+const ENEMY_KILL_SNIPER_AMMO = 5
 /** 보급 상자로 기관총 획득 시 기관 탄창에 더해지는 발수 */
 const MG_START_AMMO = 30
 /** 보급 상자로 스나이퍼 획득 시 스나 탄창에 더해지는 발수 */
@@ -2424,7 +2427,7 @@ function GameScene({
 
       const { worldHp: whEl, worldHpBar: wbEl } = hudRefs?.current ?? {}
       if (whEl) {
-        whEl.textContent = `생존 HP ${Math.max(0, Math.ceil(wh.hp))} / ${wh.maxHp} · −${WORLD_HP_DRAIN_PER_SEC}/초 · 팩 +${WORLD_HP_PICKUP_HEAL} · 처치 +${ENEMY_KILL_HEAL}`
+        whEl.textContent = `생존 HP ${Math.max(0, Math.ceil(wh.hp))} / ${wh.maxHp} · −${WORLD_HP_DRAIN_PER_SEC}/초 · 팩 +${WORLD_HP_PICKUP_HEAL} · 처치 +${ENEMY_KILL_HEAL} HP · 기관+${ENEMY_KILL_MG_AMMO} 스나+${ENEMY_KILL_SNIPER_AMMO}`
       }
       if (wbEl) {
         const ratio = Math.max(0, wh.hp / wh.maxHp)
@@ -2516,20 +2519,11 @@ function GameScene({
         if (clubDeadEnemies.length) {
           const whk = worldSurvivalHpRef.current
           whk.hp = Math.min(whk.maxHp, whk.hp + ENEMY_KILL_HEAL * clubDeadEnemies.length)
+          const Lc = loadoutRef.current
+          const n = clubDeadEnemies.length
+          Lc.mgAmmo += ENEMY_KILL_MG_AMMO * n
+          Lc.sniperAmmo += ENEMY_KILL_SNIPER_AMMO * n
           setEnemyIds((keys) => keys.filter((k) => !clubDeadEnemies.some((d) => d.eid === k)))
-          const addIds = []
-          for (const d of clubDeadEnemies) {
-            const aid = `ap-${nextAmmoPickupId.current++}`
-            ammoPickupsRef.current.set(aid, {
-              x: d.x,
-              z: d.z,
-              mg: AMMO_DROP_ORB_MG,
-              sniper: AMMO_DROP_ORB_SNIPER,
-              respawnUntil: 0,
-            })
-            addIds.push(aid)
-          }
-          setAmmoPickupIds((prev) => [...prev, ...addIds])
         }
 
         if (
@@ -3249,15 +3243,9 @@ function GameScene({
             if (worldSurvival) {
               const whb = worldSurvivalHpRef.current
               whb.hp = Math.min(whb.maxHp, whb.hp + ENEMY_KILL_HEAL)
-              const aid = `ap-${nextAmmoPickupId.current++}`
-              ammoPickupsRef.current.set(aid, {
-                x: ex,
-                z: ez,
-                mg: AMMO_DROP_ORB_MG,
-                sniper: AMMO_DROP_ORB_SNIPER,
-                respawnUntil: 0,
-              })
-              setAmmoPickupIds((prev) => [...prev, aid])
+              const Lk = loadoutRef.current
+              Lk.mgAmmo += ENEMY_KILL_MG_AMMO
+              Lk.sniperAmmo += ENEMY_KILL_SNIPER_AMMO
             }
           }
         }
@@ -4391,7 +4379,7 @@ export default function App() {
         <div style={{ fontSize: 10, opacity: 0.55, marginTop: 6 }}>
           {isCtfGameMode(gameMode)
             ? '숫자 1 · 스나이퍼 / 숫자 2 · 기관총'
-            : '스페이스 점프 · 1·스나 2·기관 3·몽둥이 · 기관/스나 탄창 분리 · 처치 드롭·상자로 보충'}
+            : '스페이스 점프 · 1·스나 2·기관 3·몽둥이 · 기관/스나 탄창 분리 · 적 처치 시 탄 자동 보급 · 상자 보충'}
         </div>
       </div>
       {(gameMode === GAME_MODE_SOLO || gameMode === GAME_MODE_MMO_ONLINE) && (
