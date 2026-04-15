@@ -223,8 +223,6 @@ const WORLD_LOOT_CRATE_COUNT = 12
 /** MMO: 같은 맵에 유저가 많을 때 보급 상자 추가 */
 const WORLD_LOOT_CRATE_COUNT_MMO = 22
 const CRATE_HALF = { x: 0.52, y: 0.55, z: 0.52 }
-/** 적 처치 시 생존 HP 회복 (솔로/MMO) */
-const ENEMY_KILL_HEAL = 20
 /** 적 처치 시 로드아웃에 자동 보급되는 탄약 */
 const ENEMY_KILL_MG_AMMO = 20
 const ENEMY_KILL_SNIPER_AMMO = 5
@@ -636,7 +634,11 @@ function HpPickupOrb({ id, pickupsRef, eyeRef, pillars }) {
   const g = useRef(null)
   useFrame((state) => {
     const pk = pickupsRef.current?.get(id)
-    if (!pk || !g.current) return
+    if (!g.current) return
+    if (!pk) {
+      g.current.visible = false
+      return
+    }
     const t = nowSec()
     if (t < pk.respawnUntil) {
       g.current.visible = false
@@ -1100,7 +1102,7 @@ function Wc3Minimap({ dataRef }) {
         ctx.fillText('솔로 · 붉은 네모=적 · 녹색 마름모=HP 팩', innerX + 3, innerY + 10)
         ctx.fillStyle = 'rgba(200, 200, 200, 0.85)'
         ctx.font = '600 7.5px system-ui,sans-serif'
-        ctx.fillText('생존 HP 감소 · 팩 +25 · 깃발은 로컬 2인 모드', innerX + 3, innerY + 21)
+        ctx.fillText('생존 HP 감소 · 팩·적 처치 HP +25 · 로컬 2인은 깃발', innerX + 3, innerY + 21)
       }
 
       rafRef.current = requestAnimationFrame(tick)
@@ -1878,6 +1880,8 @@ function GameScene({
   const p2WeaponSnRef = useRef(null)
   const p2WeaponClubRef = useRef(null)
   const nextAmmoPickupId = useRef(1)
+  const nextHpDropPickupId = useRef(1)
+  const [hpDropPickupIds, setHpDropPickupIds] = useState([])
   const cratesRef = useRef(new Map())
   const ammoPickupsRef = useRef(new Map())
   const [crateIds, setCrateIds] = useState([])
@@ -1901,6 +1905,7 @@ function GameScene({
 
   useEffect(() => {
     hpPickupsRef.current.clear()
+    setHpDropPickupIds([])
     ammoPickupsRef.current.clear()
     setAmmoPickupIds([])
     cratesRef.current.clear()
@@ -2365,12 +2370,16 @@ function GameScene({
         if (playerRef.current) playerRef.current.position.set(p.x, p.y, p.z)
         movingRef.current = false
       }
-      hpPickupsRef.current.forEach((pk) => {
+      const hpEnemyDropsConsumed = []
+      hpPickupsRef.current.forEach((pk, pkid) => {
         if (tNow < pk.respawnUntil) return
         const dx = p.x - pk.x
         const dz = p.z - pk.z
-        if (dx * dx + dz * dz <= WORLD_HP_PICKUP_RADIUS * WORLD_HP_PICKUP_RADIUS) {
-          wh.hp = Math.min(wh.maxHp, wh.hp + WORLD_HP_PICKUP_HEAL)
+        if (dx * dx + dz * dz > WORLD_HP_PICKUP_RADIUS * WORLD_HP_PICKUP_RADIUS) return
+        wh.hp = Math.min(wh.maxHp, wh.hp + WORLD_HP_PICKUP_HEAL)
+        if (pk.enemyDrop) {
+          hpEnemyDropsConsumed.push(pkid)
+        } else {
           const span = WORLD_HP_PICKUP_RESPAWN_SEC_MAX - WORLD_HP_PICKUP_RESPAWN_SEC_MIN
           pk.respawnUntil = tNow + WORLD_HP_PICKUP_RESPAWN_SEC_MIN + Math.random() * span
           const [nx, nz] = randomHpPackXZ(pillars)
@@ -2378,6 +2387,10 @@ function GameScene({
           pk.z = nz
         }
       })
+      if (hpEnemyDropsConsumed.length) {
+        hpEnemyDropsConsumed.forEach((id) => hpPickupsRef.current.delete(id))
+        setHpDropPickupIds((prev) => prev.filter((k) => !hpEnemyDropsConsumed.includes(k)))
+      }
       const ammoTaken = []
       ammoPickupsRef.current.forEach((pk, aid) => {
         if (tNow < pk.respawnUntil) return
@@ -2427,7 +2440,7 @@ function GameScene({
 
       const { worldHp: whEl, worldHpBar: wbEl } = hudRefs?.current ?? {}
       if (whEl) {
-        whEl.textContent = `생존 HP ${Math.max(0, Math.ceil(wh.hp))} / ${wh.maxHp} · −${WORLD_HP_DRAIN_PER_SEC}/초 · 팩 +${WORLD_HP_PICKUP_HEAL} · 처치 +${ENEMY_KILL_HEAL} HP · 기관+${ENEMY_KILL_MG_AMMO} 스나+${ENEMY_KILL_SNIPER_AMMO}`
+        whEl.textContent = `생존 HP ${Math.max(0, Math.ceil(wh.hp))} / ${wh.maxHp} · −${WORLD_HP_DRAIN_PER_SEC}/초 · 팩·적 처치 HP +${WORLD_HP_PICKUP_HEAL} · 기관+${ENEMY_KILL_MG_AMMO} 스나+${ENEMY_KILL_SNIPER_AMMO}`
       }
       if (wbEl) {
         const ratio = Math.max(0, wh.hp / wh.maxHp)
@@ -2517,12 +2530,20 @@ function GameScene({
           }
         })
         if (clubDeadEnemies.length) {
-          const whk = worldSurvivalHpRef.current
-          whk.hp = Math.min(whk.maxHp, whk.hp + ENEMY_KILL_HEAL * clubDeadEnemies.length)
           const Lc = loadoutRef.current
           const n = clubDeadEnemies.length
           Lc.mgAmmo += ENEMY_KILL_MG_AMMO * n
           Lc.sniperAmmo += ENEMY_KILL_SNIPER_AMMO * n
+          for (const d of clubDeadEnemies) {
+            const hid = `hpd-${nextHpDropPickupId.current++}`
+            hpPickupsRef.current.set(hid, {
+              x: d.x,
+              z: d.z,
+              respawnUntil: 0,
+              enemyDrop: true,
+            })
+            setHpDropPickupIds((prev) => [...prev, hid])
+          }
           setEnemyIds((keys) => keys.filter((k) => !clubDeadEnemies.some((d) => d.eid === k)))
         }
 
@@ -3241,11 +3262,17 @@ function GameScene({
             enemies.current.delete(hitEnemyId)
             deadEnemyIds.push(hitEnemyId)
             if (worldSurvival) {
-              const whb = worldSurvivalHpRef.current
-              whb.hp = Math.min(whb.maxHp, whb.hp + ENEMY_KILL_HEAL)
               const Lk = loadoutRef.current
               Lk.mgAmmo += ENEMY_KILL_MG_AMMO
               Lk.sniperAmmo += ENEMY_KILL_SNIPER_AMMO
+              const hid = `hpd-${nextHpDropPickupId.current++}`
+              hpPickupsRef.current.set(hid, {
+                x: ex,
+                z: ez,
+                respawnUntil: 0,
+                enemyDrop: true,
+              })
+              setHpDropPickupIds((prev) => [...prev, hid])
             }
           }
         }
@@ -3863,6 +3890,16 @@ function GameScene({
 
       {!isCtfGameMode(gameMode) &&
         hpPickupIdList.map((hid) => (
+          <HpPickupOrb
+            key={hid}
+            id={hid}
+            pickupsRef={hpPickupsRef}
+            eyeRef={playerEyeWorld}
+            pillars={pillars}
+          />
+        ))}
+      {!isCtfGameMode(gameMode) &&
+        hpDropPickupIds.map((hid) => (
           <HpPickupOrb
             key={hid}
             id={hid}
