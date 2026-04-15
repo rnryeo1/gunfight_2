@@ -117,18 +117,23 @@ const BULLET_VIS_RADIUS = 0.02
 const BULLET_VIS_LENGTH = 0.82
 const BULLET_RADIUS = BULLET_HIT_RADIUS
 const ENEMY_HALF = { x: 0.5, y: 0.75, z: 0.5 }
-const ENEMY_COUNT = 42
+const ENEMY_COUNT = 36
 /** 오픈월드 MMO: 맵 대비 적 밀도 (솔로보다 많게) */
-const MMO_ENEMY_COUNT = 96
-/** 가로(X) · 세로(Z) — Fly Pieter 느낌의 넓은 오픈 필드 */
-const MAP_HALF_X = 300
-const MAP_HALF_Z = 420
+const MMO_ENEMY_COUNT = 70
+/** 솔로: 적이 플레이어에게 발사하는 사거리(XZ) */
+const ENEMY_FIRE_RANGE = 52
+const ENEMY_FIRE_RANGE_SQ = ENEMY_FIRE_RANGE * ENEMY_FIRE_RANGE
+const ENEMY_FIRE_COOLDOWN = 0.92
+const ENEMY_BULLET_DAMAGE = 8
+/** 가로(X) · 세로(Z) — 오픈 필드 (이전보다 축소) */
+const MAP_HALF_X = 200
+const MAP_HALF_Z = 280
 const MAP_HALF = Math.max(MAP_HALF_X, MAP_HALF_Z)
 const TERRAIN_PAD = 36
 const TERRAIN_W = MAP_HALF_X * 2 + TERRAIN_PAD
 const TERRAIN_D = MAP_HALF_Z * 2 + TERRAIN_PAD
-const TERRAIN_SEG_X = 176
-const TERRAIN_SEG_Z = 244
+const TERRAIN_SEG_X = 120
+const TERRAIN_SEG_Z = 168
 /** 구형 엔티티·픽업 등 거리 상한(성능) — 거리만으로 안 숨김 */
 const VIEW_RANGE_SQ = (Math.max(MAP_HALF_X, MAP_HALF_Z) * 2.35) ** 2
 /** 언덕·높이 차에 덜 끊기도록 완화 */
@@ -142,7 +147,7 @@ const LOS_CLEAR_EPS = 0.095
 const WALL_THICK = 2.2
 const WALL_HEIGHT = 5.5
 const PLAYER_R = 0.34
-const PILLAR_COUNT = 110
+const PILLAR_COUNT = 82
 const PILLAR_RADIUS = 0.58
 const PILLAR_HEIGHT = 4.1
 const PILLAR_CENTER_Y = PILLAR_HEIGHT / 2
@@ -1823,6 +1828,7 @@ function GameScene({
         pos: new THREE.Vector3(x, y, z),
         hp: ENEMY_MAX_HP,
         maxHp: ENEMY_MAX_HP,
+        nextFireAt: 0,
       })
       ids.push(id)
     }
@@ -3138,6 +3144,51 @@ function GameScene({
       en.pos.y = terrainHeight(en.pos.x, en.pos.z) + ENEMY_HALF.y
     })
 
+    if (gameMode === GAME_MODE_SOLO && worldSurvival) {
+      enemies.current.forEach((en) => {
+        const dx = p.x - en.pos.x
+        const dz = p.z - en.pos.z
+        const distSq = dx * dx + dz * dz
+        if (distSq > ENEMY_FIRE_RANGE_SQ || distSq < 0.64) return
+        const tFire = en.nextFireAt ?? 0
+        if (tNow < tFire) return
+        const dist = Math.sqrt(distSq)
+        const plBodyY = p.y + 0.75
+        const enGunY = terrainHeight(en.pos.x, en.pos.z) + 0.72
+        if (
+          !worldEntityVisible(en.pos.x, enGunY, en.pos.z, p.x, plBodyY, p.z, pillars)
+        ) {
+          en.nextFireAt = tNow + 0.22
+          return
+        }
+        const dirX = dx / dist
+        const dirZ = dz / dist
+        const bid = nextBulletId.current++
+        const bulletLife = Math.max(10, (MAP_HALF * 2.2) / 18)
+        bullets.current.set(bid, {
+          pos: new THREE.Vector3(
+            en.pos.x + dirX * 0.55,
+            enGunY,
+            en.pos.z + dirZ * 0.55,
+          ),
+          dir: new THREE.Vector3(dirX, 0, dirZ),
+          life: bulletLife,
+          damage: ENEMY_BULLET_DAMAGE,
+          speed: 18,
+          color: '#90a4ae',
+          emissive: '#455a64',
+          emissiveIntensity: 0.32,
+          radius: BULLET_HIT_RADIUS * 0.92,
+          weaponId: 'mg',
+          fromEnemy: true,
+          ownerKey: null,
+          ownerTeam: null,
+        })
+        setBulletIds((keys) => [...keys, bid])
+        en.nextFireAt = tNow + ENEMY_FIRE_COOLDOWN * (0.35 + Math.random() * 0.9)
+      })
+    }
+
     const deadBullets = []
     const deadEnemyIds = []
     bullets.current.forEach((b, id) => {
@@ -3164,27 +3215,29 @@ function GameScene({
       }
 
       let hitEnemyId = null
-      enemies.current.forEach((en, eid) => {
-        if (hitEnemyId !== null) return
-        if (
-          sphereIntersectsBox(
-            b.pos.x,
-            b.pos.y,
-            b.pos.z,
-            en.pos.x,
-            en.pos.y,
-            en.pos.z,
-            ENEMY_HALF.x,
-            ENEMY_HALF.y,
-            ENEMY_HALF.z,
-            br,
-          )
-        ) {
-          hitEnemyId = eid
-        }
-      })
+      if (!b.fromEnemy) {
+        enemies.current.forEach((en, eid) => {
+          if (hitEnemyId !== null) return
+          if (
+            sphereIntersectsBox(
+              b.pos.x,
+              b.pos.y,
+              b.pos.z,
+              en.pos.x,
+              en.pos.y,
+              en.pos.z,
+              ENEMY_HALF.x,
+              ENEMY_HALF.y,
+              ENEMY_HALF.z,
+              br,
+            )
+          ) {
+            hitEnemyId = eid
+          }
+        })
+      }
 
-      if (hitEnemyId !== null) {
+      if (!b.fromEnemy && hitEnemyId !== null) {
         const en = enemies.current.get(hitEnemyId)
         if (en) {
           en.hp -= b.damage ?? 10
@@ -3210,6 +3263,42 @@ function GameScene({
         }
         deadBullets.push(id)
         b.life = 0
+        return
+      }
+
+      if (
+        gameMode === GAME_MODE_SOLO &&
+        worldSurvival &&
+        b.fromEnemy &&
+        sphereIntersectsBox(
+          b.pos.x,
+          b.pos.y,
+          b.pos.z,
+          p.x,
+          p.y + 0.75,
+          p.z,
+          ENEMY_HALF.x,
+          ENEMY_HALF.y,
+          ENEMY_HALF.z,
+          br,
+        )
+      ) {
+        const whp = worldSurvivalHpRef.current
+        whp.hp -= b.damage ?? ENEMY_BULLET_DAMAGE
+        bumpPlayerHitFx(hitFeedbackRef, false)
+        deadBullets.push(id)
+        b.life = 0
+        if (whp.hp <= 0) {
+          whp.hp = whp.maxHp
+          const [rx, rz] = randomOpenWorldSpawnXZ(pillars)
+          p.x = rx
+          p.z = rz
+          ;[p.x, p.z] = resolveBodyInArena(p.x, p.z, PLAYER_R, pillars)
+          p.y = terrainHeight(p.x, p.z)
+          p0VertVelRef.current = 0
+          if (playerRef.current) playerRef.current.position.set(p.x, p.y, p.z)
+          movingRef.current = false
+        }
         return
       }
 
